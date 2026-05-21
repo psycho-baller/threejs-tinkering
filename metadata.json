@@ -1,0 +1,1 @@
+{"name":"GPGPU Particle Crowd Simulation","description":"A beautifully crafted Lusion-style real-time simulation rendering 524,288 glowing amber particles as a human group of shapes dynamic morphs, built with Three.js custom GPGPU FBO ping-pong.","requestFramePermissions":[],"majorCapabilities":["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]}
