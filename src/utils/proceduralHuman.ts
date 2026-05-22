@@ -1,5 +1,18 @@
 import { Joint, Bone } from "../types";
 
+export interface FigureLayout {
+  poseType: number;
+  offsetX: number;
+  offsetY: number;
+  offsetZ: number;
+  rotationY: number;
+  scale: number;
+  isStandout: boolean;
+  bodyType: "average" | "volumetric" | "athletic" | "skinny";
+  gender: "male" | "female";
+  hairStyle: "short" | "long" | "bald";
+}
+
 // Helper to define joint coordinates in 3D
 function createJoint(x: number, y: number, z: number): Joint {
   return { x, y, z };
@@ -128,6 +141,27 @@ function getPoseBones(poseType: number): Bone[] {
       break;
   }
 
+  // Extend forearm to find hand end point
+  const lForearmDx = lWrist.x - lElbow.x;
+  const lForearmDy = lWrist.y - lElbow.y;
+  const lForearmDz = lWrist.z - lElbow.z;
+  const lForearmLen = Math.sqrt(lForearmDx * lForearmDx + lForearmDy * lForearmDy + lForearmDz * lForearmDz) || 1.0;
+  const lHandEnd = createJoint(
+    lWrist.x + (lForearmDx / lForearmLen) * 0.24,
+    lWrist.y + (lForearmDy / lForearmLen) * 0.24,
+    lWrist.z + (lForearmDz / lForearmLen) * 0.24
+  );
+
+  const rForearmDx = rWrist.x - rElbow.x;
+  const rForearmDy = rWrist.y - rElbow.y;
+  const rForearmDz = rWrist.z - rElbow.z;
+  const rForearmLen = Math.sqrt(rForearmDx * rForearmDx + rForearmDy * rForearmDy + rForearmDz * rForearmDz) || 1.0;
+  const rHandEnd = createJoint(
+    rWrist.x + (rForearmDx / rForearmLen) * 0.24,
+    rWrist.y + (rForearmDy / rForearmLen) * 0.24,
+    rWrist.z + (rForearmDz / rForearmLen) * 0.24
+  );
+
   // Push all bones of the skeleton
   bones.push({ id: "torso", start: torsoStart, end: torsoEnd, radius: 0.15, weight: 0.24 });
   bones.push({ id: "head", start: headStart, end: headEnd, radius: 0.11, weight: 0.18 });
@@ -142,6 +176,9 @@ function getPoseBones(poseType: number): Bone[] {
   bones.push({ id: "r_upperarm", start: rShoulder, end: rElbow, radius: 0.05, weight: 0.06 });
   bones.push({ id: "r_lowerarm", start: rElbow, end: rWrist, radius: 0.04, weight: 0.06 });
 
+  bones.push({ id: "l_hand", start: lWrist, end: lHandEnd, radius: 0.035, weight: 0.05 });
+  bones.push({ id: "r_hand", start: rWrist, end: rHandEnd, radius: 0.035, weight: 0.05 });
+
   bones.push({ id: "l_thigh", start: lThighS, end: lThighE, radius: 0.075, weight: 0.06 });
   bones.push({ id: "l_shin", start: lShinS, end: lShinE, radius: 0.055, weight: 0.06 });
   bones.push({ id: "r_thigh", start: rThighS, end: rThighE, radius: 0.075, weight: 0.06 });
@@ -151,22 +188,20 @@ function getPoseBones(poseType: number): Bone[] {
 }
 
 // Samples a single 3D point on or inside a capsule segment, incorporating body types and side depth fixes
-function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: number; z: number }) {
+function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: number; z: number }) {
   const { start, end, radius } = bone;
+  const bodyType = layout.bodyType;
 
   const dx = end.x - start.x;
   const dy = end.y - start.y;
   const dz = end.z - start.z;
   const lengthSq = dx * dx + dy * dy + dz * dz;
 
-  if (lengthSq < 0.0001) {
-    // It's a sphere (like the head) - shape it into a realistic head ellipsoid based on body type
-    const u1 = Math.random();
-    const u2 = Math.random();
-    const theta = u1 * Math.PI * 2.0;
-    const phi = Math.acos(2.0 * u2 - 1.0);
-    const r = radius * (0.8 + 0.2 * Math.pow(Math.random(), 0.3));
-
+  if (bone.id === "head") {
+    // Generate head and facial features!
+    const rPart = Math.random();
+    
+    // We shape the head dimensions based on body type
     let hx = 0.92;
     let hy = 1.25;
     let hz = 1.10; // Increased base depth to prevent flatness
@@ -185,9 +220,245 @@ function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: numb
       hz = 1.05;
     }
 
-    out.x = start.x + r * Math.sin(phi) * Math.cos(theta) * hx;
-    out.y = start.y + r * Math.sin(phi) * Math.sin(theta) * hy;
-    out.z = start.z + r * Math.cos(phi) * hz;
+    if (rPart < 0.05) {
+      // 1. EYES (5% of head particles)
+      const isLeft = rPart < 0.025;
+      const eyeSide = isLeft ? -1.0 : 1.0;
+      
+      // Symmetrical eyes positioned on the front surface of the skull
+      const eyeAngleX = eyeSide * 0.32; // lateral offset angle
+      const eyeAngleY = 0.15;           // height angle (above center)
+      
+      const ex = radius * Math.sin(eyeAngleX) * Math.cos(eyeAngleY) * hx;
+      const ey = radius * Math.sin(eyeAngleY) * hy;
+      const ez = radius * Math.cos(eyeAngleX) * Math.cos(eyeAngleY) * hz;
+      
+      const u = Math.random() * Math.PI * 2;
+      const rEye = 0.012 * Math.sqrt(Math.random());
+      
+      out.x = start.x + ex + Math.cos(u) * rEye;
+      out.y = start.y + ey + Math.sin(u) * rEye * 0.6; // flat ellipse shape
+      out.z = start.z + ez + (Math.random() - 0.5) * 0.003;
+      return;
+      
+    } else if (rPart < 0.09) {
+      // 2. NOSE (4% of head particles)
+      const tNose = Math.random(); // 0 (bridge) to 1 (tip)
+      const noseY = 0.05 - tNose * 0.08; // starts at bridge height, down to tip height
+      
+      // Depth of surface at this height
+      const zSurface = radius * Math.sqrt(1.0 - Math.pow(noseY / (radius * hy), 2)) * hz;
+      const protrusion = tNose * 0.032; // nose sticks out forward
+      
+      out.x = start.x + (Math.random() - 0.5) * 0.012 * (tNose * 0.8 + 0.2); // nose width, tapers at top
+      out.y = start.y + noseY * hy;
+      out.z = start.z + zSurface + protrusion;
+      return;
+      
+    } else if (rPart < 0.13) {
+      // 3. MOUTH (4% of head particles)
+      const mouthWidth = 0.035;
+      const mouthY = -0.06;
+      
+      const zSurface = radius * Math.sqrt(1.0 - Math.pow(mouthY / (radius * hy), 2)) * hz;
+      
+      // Curved smiling lips
+      const tMouth = (Math.random() - 0.5) * 2.0; // -1 to +1
+      const mx = tMouth * mouthWidth;
+      const my = mouthY + (1.0 - tMouth * tMouth) * 0.005; // smile curve
+      
+      out.x = start.x + mx;
+      out.y = start.y + my * hy + (Math.random() - 0.5) * 0.004;
+      out.z = start.z + zSurface * 1.01 + (Math.random() - 0.5) * 0.003;
+      return;
+      
+    } else if (rPart < 0.19) {
+      // 4. EARS (6% of head particles)
+      const isLeft = rPart < 0.16;
+      const earSide = isLeft ? -1.0 : 1.0;
+      
+      const tEar = Math.random() * Math.PI; // ear curve
+      const earY = -0.05 + Math.random() * 0.09;
+      
+      out.x = start.x + earSide * (radius * hx * 0.98 + Math.sin(tEar) * 0.018);
+      out.y = start.y + earY * hy + Math.cos(tEar) * 0.012;
+      out.z = start.z - 0.01 - Math.cos(tEar) * 0.008 + (Math.random() - 0.5) * 0.004;
+      return;
+      
+    } else if (rPart < 0.55 && layout.hairStyle !== "bald") {
+      // 5. HAIR (36% of head particles, skip if bald)
+      const isFemale = layout.gender === "female";
+      const style = layout.hairStyle;
+      
+      if (style === "long" && Math.random() < 0.65) {
+        // Flowing long hair strands (sides and back, hanging down to shoulders)
+        const tHair = Math.random(); // 0 is shoulder-level, 1 is top of head
+        const strandY = start.y + 0.08 - tHair * 0.38; // flows down
+        
+        // Hair wraps around back/sides
+        const angle = Math.PI * (0.6 + Math.random() * 0.8);
+        const side = Math.random() < 0.5 ? -1.0 : 1.0;
+        const hairR = radius * 1.08 + (1.0 - tHair) * 0.02; // tapers/flares slightly
+        
+        out.x = start.x + Math.sin(angle * side) * hairR * hx;
+        out.y = strandY;
+        out.z = start.z + Math.cos(angle * side) * hairR * hz - (1.0 - tHair) * 0.01;
+        
+        // Add subtle waves
+        out.x += Math.sin(strandY * 20.0) * 0.006;
+        out.z += Math.cos(strandY * 20.0) * 0.006;
+        return;
+      } else {
+        // Short hair / Skull cap (top/back and side temples)
+        const hAngle = Math.random() * Math.PI * 2.0;
+        const hPhi = Math.acos(Math.random() * 0.9); // top hemisphere
+        
+        const hairR = radius * (1.02 + 0.08 * Math.pow(Math.random(), 0.5));
+        
+        const hxVal = hairR * Math.sin(hPhi) * Math.cos(hAngle) * hx;
+        const hyVal = hairR * Math.sin(hPhi) * Math.sin(hAngle) * hy;
+        const hzVal = hairR * Math.cos(hPhi) * hz;
+        
+        // Create hairline: restrict hair from front-face area
+        if (hzVal > 0.03 * hz && hyVal < 0.06 * hy) {
+          // Reflect to back
+          out.x = start.x + hxVal;
+          out.y = start.y + hyVal;
+          out.z = start.z - Math.abs(hzVal);
+        } else {
+          out.x = start.x + hxVal;
+          out.y = start.y + hyVal;
+          out.z = start.z + hzVal;
+        }
+        return;
+      }
+    }
+    
+    // 6. SKULL BASE (Fallback and remaining particles)
+    const u1 = Math.random();
+    const u2 = Math.random();
+    const theta = u1 * Math.PI * 2.0;
+    const phi = Math.acos(2.0 * u2 - 1.0);
+    const r = radius * (0.85 + 0.15 * Math.pow(Math.random(), 0.3));
+
+    let sx = r * Math.sin(phi) * Math.cos(theta) * hx;
+    let sy = r * Math.sin(phi) * Math.sin(theta) * hy;
+    let sz = r * Math.cos(phi) * hz;
+
+    // Jaw/chin contouring: taper lower half of face
+    if (sy < 0.0) {
+      const taper = 1.0 + (sy / (radius * hy)) * 0.35;
+      sx *= taper;
+      sz *= taper;
+    }
+
+    // Facial plane flattening: slightly flatten front surface
+    if (sz > 0.04 * hz) {
+      sz = 0.04 * hz + (sz - 0.04 * hz) * 0.65;
+    }
+
+    out.x = start.x + sx;
+    out.y = start.y + sy;
+    out.z = start.z + sz;
+    return;
+  }
+
+  // Handle hand and fingers rendering
+  if (bone.id === "l_hand" || bone.id === "r_hand") {
+    const segmentLen = Math.sqrt(lengthSq);
+    const ndx = dx / segmentLen;
+    const ndy = dy / segmentLen;
+    const ndz = dz / segmentLen;
+
+    let refX = 1.0, refY = 0.0, refZ = 0.0;
+    if (Math.abs(ndx) > 0.9) {
+      refX = 0.0;
+      refY = 1.0;
+      refZ = 0.0;
+    }
+    
+    // P = D x Ref
+    let pxVal = ndy * refZ - ndz * refY;
+    let pyVal = ndz * refX - ndx * refZ;
+    let pzVal = ndx * refY - ndy * refX;
+    let lenP = Math.sqrt(pxVal*pxVal + pyVal*pyVal + pzVal*pzVal);
+    pxVal /= lenP;
+    pyVal /= lenP;
+    pzVal /= lenP;
+    
+    // Q = P x D
+    let qxVal = pyVal * ndz - pzVal * ndy;
+    let qyVal = pzVal * ndx - pxVal * ndz;
+    let qzVal = pxVal * ndy - pyVal * ndx;
+    
+    // Adjust hand scale based on bodyType
+    let handScale = 2.4;
+    if (bodyType === "volumetric") handScale = 2.4 * 1.15;
+    else if (bodyType === "skinny") handScale = 2.4 * 0.88;
+    else if (bodyType === "athletic") handScale = 2.4 * 1.05;
+
+    const t = Math.random();
+    if (t < 0.35) {
+      // Palm region
+      const tNorm = t / 0.35;
+      
+      // Smooth wedge transition from circular wrist to flat palm
+      let baseWristRadius = 0.026;
+      if (bodyType === "volumetric") baseWristRadius *= 1.22;
+      else if (bodyType === "skinny") baseWristRadius *= 0.85;
+      
+      const wristWidth = baseWristRadius;
+      const targetPalmWidth = 0.046 * handScale;
+      const palmWidth = wristWidth + (targetPalmWidth - wristWidth) * tNorm;
+      
+      const wristThickness = baseWristRadius;
+      const targetPalmThickness = 0.012 * handScale;
+      const palmThickness = wristThickness + (targetPalmThickness - wristThickness) * tNorm;
+      
+      const offsetP = (Math.random() - 0.5) * 2.0 * palmWidth;
+      const offsetQ = (Math.random() - 0.5) * 2.0 * palmThickness;
+      
+      out.x = start.x + t * dx + pxVal * offsetP + qxVal * offsetQ;
+      out.y = start.y + t * dy + pyVal * offsetP + qyVal * offsetQ;
+      out.z = start.z + t * dz + pzVal * offsetP + qzVal * offsetQ;
+    } else {
+      // Fingers region
+      const f = Math.floor(Math.random() * 5);
+      
+      // Define finger length limits
+      const tEnd = [0.65, 0.92, 1.0, 0.94, 0.82];
+      
+      const fLimit = tEnd[f];
+      let tNorm = 0.0;
+      if (t < fLimit) {
+        tNorm = (t - 0.35) / (fLimit - 0.35);
+      } else {
+        tNorm = Math.random();
+      }
+      
+      const startP = [0.018, 0.010, 0.0, -0.010, -0.015];
+      const endP =   [0.035, 0.016, 0.0, -0.014, -0.022];
+      const startQ = [0.006, 0.0, 0.0, 0.0, 0.0];
+      const endQ =   [0.014, 0.0, 0.0, 0.0, 0.0];
+      
+      const fingerP = (startP[f] * (1.0 - tNorm) + endP[f] * tNorm) * handScale;
+      const fingerQ = (startQ[f] * (1.0 - tNorm) + endQ[f] * tNorm) * handScale;
+      const fingerLengthProgress = 0.35 + tNorm * (fLimit - 0.35);
+      
+      const fingerRadius = 0.0065 * handScale * (1.0 - 0.3 * tNorm);
+      const fAngle = Math.random() * Math.PI * 2.0;
+      const rScale = fingerRadius * Math.sqrt(Math.random());
+      
+      const cosA = Math.cos(fAngle);
+      const sinA = Math.sin(fAngle);
+      
+      const P_coord = fingerP + cosA * rScale;
+      const Q_coord = fingerQ + sinA * rScale;
+      
+      out.x = start.x + fingerLengthProgress * dx + pxVal * P_coord + qxVal * Q_coord;
+      out.y = start.y + fingerLengthProgress * dy + pyVal * P_coord + qyVal * Q_coord;
+      out.z = start.z + fingerLengthProgress * dz + pzVal * P_coord + qzVal * Q_coord;
+    }
     return;
   }
 
@@ -203,7 +474,6 @@ function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: numb
   let scaleZ = 1.0;
 
   if (bone.id === "torso") {
-    // Torso: t=0 is pelvis, t=1 is neck
     if (t < 0.2) {
       const localT = t / 0.2;
       shapeFactor = 1.15 * (1 - localT) + 0.95 * localT;
@@ -217,7 +487,6 @@ function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: numb
       const localT = (t - 0.8) / 0.2;
       shapeFactor = 1.28 * (1 - localT) + 0.8 * localT;
     }
-    // Flatten torso to represent a ribcage (wider side-to-side, but keep depth at 1.12 to prevent side-profile flatness)
     scaleX = 1.28;
     scaleZ = 1.12;
   } else if (bone.id === "shoulders") {
@@ -228,7 +497,7 @@ function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: numb
     scaleZ = 1.12;
   } else if (bone.id === "l_thigh" || bone.id === "r_thigh") {
     shapeFactor = 1.2 - 0.4 * t;
-    scaleZ = 1.05; // Slightly deeper thighs
+    scaleZ = 1.05;
   } else if (bone.id === "l_shin" || bone.id === "r_shin") {
     if (t < 0.3) {
       const localT = t / 0.3;
@@ -240,7 +509,7 @@ function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: numb
       const localT = (t - 0.7) / 0.3;
       shapeFactor = 0.8 * (1 - localT) + 0.58 * localT;
     }
-    scaleZ = 1.05; // Slightly deeper calves
+    scaleZ = 1.05;
   } else if (bone.id === "l_upperarm" || bone.id === "r_upperarm") {
     shapeFactor = 1.1 * (1 - t) + 0.85 * t + 0.15 * Math.sin(t * Math.PI);
   } else if (bone.id === "l_lowerarm" || bone.id === "r_lowerarm") {
@@ -251,52 +520,48 @@ function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: numb
 
   // Apply body type modifiers
   if (bodyType === "volumetric") {
-    // Fat / heavy body type
     if (bone.id === "torso") {
       if (t < 0.2) {
         shapeFactor += 0.18;
       } else if (t < 0.45) {
-        shapeFactor += 0.30; // volumetric belly
+        shapeFactor += 0.30;
       } else if (t < 0.8) {
-        shapeFactor += 0.22; // wide belly/chest
+        shapeFactor += 0.22;
       } else {
         shapeFactor += 0.12;
       }
-      scaleX *= 1.35; // wider laterally to prevent circular expansion
-      scaleZ *= 1.10; // flatter depth representation
+      scaleX *= 1.35;
+      scaleZ *= 1.10;
     } else if (bone.id === "shoulders" || bone.id === "pelvis") {
       shapeFactor *= 1.22;
       scaleZ *= 1.12;
     } else if (bone.id === "neck") {
       shapeFactor *= 1.18;
     } else {
-      // Limbs are thicker
       shapeFactor *= 1.22;
     }
   } else if (bodyType === "athletic") {
-    // Strong / muscular body type (muscular chest, broad shoulders, narrow waist)
     if (bone.id === "torso") {
       if (t >= 0.45 && t < 0.8) {
-        shapeFactor *= 1.18; // strong chest
+        shapeFactor *= 1.18;
       } else if (t < 0.45) {
-        shapeFactor *= 0.95; // trim waist
+        shapeFactor *= 0.95;
       }
-      scaleX *= 1.25; // wider chest/shoulders
+      scaleX *= 1.25;
       scaleZ *= 1.05;
     } else if (bone.id === "shoulders") {
       shapeFactor *= 1.25;
       scaleZ *= 1.1;
     } else if (bone.id === "l_upperarm" || bone.id === "r_upperarm") {
-      shapeFactor *= 1.25; // strong biceps
+      shapeFactor *= 1.25;
     } else if (bone.id === "l_shin" || bone.id === "r_shin") {
       if (t >= 0.2 && t < 0.6) {
-        shapeFactor *= 1.25; // strong calves
+        shapeFactor *= 1.25;
       }
     } else if (bone.id === "l_thigh" || bone.id === "r_thigh") {
-      shapeFactor *= 1.15; // strong thighs
+      shapeFactor *= 1.15;
     }
   } else if (bodyType === "skinny") {
-    // Slender / skinny body type - less extreme than before to avoid looking like sticks
     if (bone.id === "torso") {
       shapeFactor *= 0.90;
       scaleX *= 0.95;
@@ -307,7 +572,7 @@ function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: numb
     } else if (bone.id === "neck") {
       shapeFactor *= 0.90;
     } else {
-      shapeFactor *= 0.85; // slender limbs (was 0.72)
+      shapeFactor *= 0.85;
     }
   }
 
@@ -316,7 +581,6 @@ function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: numb
   let ry = Math.random() - 0.5;
   let rz = Math.random() - 0.5;
 
-  // Cross product of (dx,dy,dz) and random (rx,ry,rz)
   let pxVal = dy * rz - dz * ry;
   let pyVal = dz * rx - dx * rz;
   let pzVal = dx * ry - dy * rx;
@@ -330,12 +594,10 @@ function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: numb
     lengthP = Math.sqrt(pxVal * pxVal + pyVal * pyVal + pzVal * pzVal);
   }
 
-  // Normalize perpendicular axis P
   pxVal /= lengthP;
   pyVal /= lengthP;
   pzVal /= lengthP;
 
-  // Compute second perpendicular Axis Q via cross product of Segment D and axis P
   const segmentLen = Math.sqrt(lengthSq);
   const ndx = dx / segmentLen;
   const ndy = dy / segmentLen;
@@ -350,17 +612,13 @@ function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: numb
   qyVal /= lengthQ;
   qzVal /= lengthQ;
 
-  // Generate random radial angle and radial radius
   const angle = Math.random() * Math.PI * 2.0;
-  // Apply the custom shape factor to the base radius
   const baseRadius = radius * shapeFactor;
-  // Radial scaling: (0.65 + 0.35 * sqrt(rand)) gives a nice solid shell and glowing inner vapor
   const rScale = baseRadius * (0.65 + 0.35 * Math.sqrt(Math.random()));
 
   const cosAngle = Math.cos(angle);
   const sinAngle = Math.sin(angle);
 
-  // Apply scales on local axes
   const ox = (pxVal * cosAngle + qxVal * sinAngle) * rScale;
   const oy = (pyVal * cosAngle + qyVal * sinAngle) * rScale;
   const oz = (pzVal * cosAngle + qzVal * sinAngle) * rScale;
@@ -370,57 +628,45 @@ function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: numb
   out.z = pz + oz * scaleZ;
 }
 
-// Sets up layout and parameters of the 15 figures in our crowd simulation
-interface FigureLayout {
-  poseType: number;
-  offsetX: number;
-  offsetY: number;
-  offsetZ: number;
-  rotationY: number;
-  scale: number;
-  isStandout: boolean;
-  bodyType: "average" | "volumetric" | "athletic" | "skinny";
-}
-
 export const CROWD_LAYOUTS: FigureLayout[] = [
   // 0. The Standout Figure (Centered, larger, facing camera!)
-  { poseType: 0, offsetX: 0, offsetY: -1.0, offsetZ: 0.0, rotationY: 0.0, scale: 1.18, isStandout: true, bodyType: "athletic" },
+  { poseType: 0, offsetX: 0, offsetY: -1.0, offsetZ: 0.0, rotationY: 0.0, scale: 1.18, isStandout: true, bodyType: "athletic", gender: "male", hairStyle: "short" },
   
   // 1. Inner Circle Background Left
-  { poseType: 1, offsetX: -1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: 0.35, scale: 1.1, isStandout: false, bodyType: "volumetric" },
+  { poseType: 1, offsetX: -1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: 0.35, scale: 1.1, isStandout: false, bodyType: "volumetric", gender: "female", hairStyle: "long" },
   // 2. Inner Circle Background Right
-  { poseType: 2, offsetX: 1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: -0.35, scale: 1.1, isStandout: false, bodyType: "skinny" },
+  { poseType: 2, offsetX: 1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: -0.35, scale: 1.1, isStandout: false, bodyType: "skinny", gender: "male", hairStyle: "short" },
   
   // 3. Middle Left Ground
-  { poseType: 3, offsetX: -3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: 0.55, scale: 1.08, isStandout: false, bodyType: "average" },
+  { poseType: 3, offsetX: -3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: 0.55, scale: 1.08, isStandout: false, bodyType: "average", gender: "female", hairStyle: "long" },
   // 4. Middle Right Ground
-  { poseType: 4, offsetX: 3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: -0.55, scale: 1.08, isStandout: false, bodyType: "athletic" },
+  { poseType: 4, offsetX: 3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: -0.55, scale: 1.08, isStandout: false, bodyType: "athletic", gender: "male", hairStyle: "short" },
   
   // 5. Deep Center Left
-  { poseType: 5, offsetX: -1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: 0.15, scale: 1.05, isStandout: false, bodyType: "volumetric" },
+  { poseType: 5, offsetX: -1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: 0.15, scale: 1.05, isStandout: false, bodyType: "volumetric", gender: "male", hairStyle: "short" },
   // 6. Deep Center Right
-  { poseType: 6, offsetX: 1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: -0.15, scale: 1.05, isStandout: false, bodyType: "skinny" },
+  { poseType: 6, offsetX: 1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: -0.15, scale: 1.05, isStandout: false, bodyType: "skinny", gender: "female", hairStyle: "long" },
 
   // 7. Middle Far Left
-  { poseType: 7, offsetX: -5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: 0.70, scale: 1.0, isStandout: false, bodyType: "average" },
+  { poseType: 7, offsetX: -5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: 0.70, scale: 1.0, isStandout: false, bodyType: "average", gender: "male", hairStyle: "short" },
   // 8. Middle Far Right
-  { poseType: 0, offsetX: 5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: -0.70, scale: 1.0, isStandout: false, bodyType: "athletic" },
+  { poseType: 0, offsetX: 5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: -0.70, scale: 1.0, isStandout: false, bodyType: "athletic", gender: "female", hairStyle: "short" },
 
   // 9. Deep Far Left
-  { poseType: 1, offsetX: -2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: 0.30, scale: 0.98, isStandout: false, bodyType: "volumetric" },
+  { poseType: 1, offsetX: -2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: 0.30, scale: 0.98, isStandout: false, bodyType: "volumetric", gender: "female", hairStyle: "long" },
   // 10. Deep Far Right
-  { poseType: 2, offsetX: 2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: -0.30, scale: 0.98, isStandout: false, bodyType: "skinny" },
+  { poseType: 2, offsetX: 2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: -0.30, scale: 0.98, isStandout: false, bodyType: "skinny", gender: "male", hairStyle: "bald" },
 
   // 11. Core Back Projection
-  { poseType: 3, offsetX: 0.0, offsetY: -1.0, offsetZ: -5.5, rotationY: 0.0, scale: 0.95, isStandout: false, bodyType: "average" },
+  { poseType: 3, offsetX: 0.0, offsetY: -1.0, offsetZ: -5.5, rotationY: 0.0, scale: 0.95, isStandout: false, bodyType: "average", gender: "female", hairStyle: "long" },
   
   // 12. Distant Deep Left
-  { poseType: 4, offsetX: -4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: 0.50, scale: 0.95, isStandout: false, bodyType: "athletic" },
+  { poseType: 4, offsetX: -4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: 0.50, scale: 0.95, isStandout: false, bodyType: "athletic", gender: "male", hairStyle: "short" },
   // 13. Distant Deep Right
-  { poseType: 5, offsetX: 4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: -0.50, scale: 0.95, isStandout: false, bodyType: "volumetric" },
+  { poseType: 5, offsetX: 4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: -0.50, scale: 0.95, isStandout: false, bodyType: "volumetric", gender: "female", hairStyle: "long" },
 
   // 14. Outer Wing Background Left
-  { poseType: 6, offsetX: -6.4, offsetY: -1.0, offsetZ: -4.5, rotationY: 0.85, scale: 0.9, isStandout: false, bodyType: "skinny" },
+  { poseType: 6, offsetX: -6.4, offsetY: -1.0, offsetZ: -4.5, rotationY: 0.85, scale: 0.9, isStandout: false, bodyType: "skinny", gender: "female", hairStyle: "long" },
 ];
 
 /**
@@ -477,8 +723,8 @@ export function generateCrowdTextures(width: number, height: number): {
         }
       }
 
-      // Sample raw point inside body structure, passing the specific figure's body type
-      sampleBonePoint(chosenBone, layout.bodyType, tempPt);
+      // Sample raw point inside body structure, passing the specific figure's layout
+      sampleBonePoint(chosenBone, layout, tempPt);
 
       // Apply scale, rotation around Y (yaw angles), and spatial position offset
       const angle = layout.rotationY;
