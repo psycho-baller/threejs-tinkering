@@ -54,7 +54,7 @@ const PRESETS: SimulationPreset[] = [
     noiseStrength: 0.12,
     noiseFrequency: 0.35,
     returnSpeed: 1.2,
-    baseSize: 0.14,
+    baseSize: 0.056,
     description: "Particles are tightly drawn to their human skeletal targets with slight organic breathing."
   },
   {
@@ -63,7 +63,7 @@ const PRESETS: SimulationPreset[] = [
     noiseStrength: 0.45,
     noiseFrequency: 0.5,
     returnSpeed: 0.9,
-    baseSize: 0.15,
+    baseSize: 0.060,
     description: "Particles drift in soft fluid currents, forming loose and alive golden structures."
   },
   {
@@ -72,7 +72,7 @@ const PRESETS: SimulationPreset[] = [
     noiseStrength: 0.85,
     noiseFrequency: 0.7,
     returnSpeed: 0.5,
-    baseSize: 0.12,
+    baseSize: 0.048,
     description: "The entire crowd completely dissolves and swirls upwards into a glowing double-helix vortex."
   },
   {
@@ -81,7 +81,7 @@ const PRESETS: SimulationPreset[] = [
     noiseStrength: 1.6,
     noiseFrequency: 1.1,
     returnSpeed: 0.6,
-    baseSize: 0.13,
+    baseSize: 0.052,
     description: "The structures melt and evaporate into an active space storm of shimmering gold."
   }
 ];
@@ -92,7 +92,7 @@ export default function App() {
   const [noiseStrength, setNoiseStrength] = useState(0.12);
   const [noiseFrequency, setNoiseFrequency] = useState(0.35);
   const [returnSpeed, setReturnSpeed] = useState(1.2);
-  const [baseSize, setBaseSize] = useState(0.14);
+  const [baseSize, setBaseSize] = useState(0.056);
   const [interactionRadius, setInteractionRadius] = useState(1.8);
   const [mouseStrength, setMouseStrength] = useState(4.5);
 
@@ -327,14 +327,14 @@ export default function App() {
                 <div id="particle-size-control" className="space-y-1.5">
                   <div className="flex justify-between text-xs font-mono text-zinc-400">
                     <span>Base Particle Size</span>
-                    <span className="text-amber-500 font-semibold">{baseSize.toFixed(2)}</span>
+                    <span className="text-amber-500 font-semibold">{baseSize.toFixed(3)}</span>
                   </div>
                   <input
                     id="particle-size-slider"
                     type="range"
-                    min="0.05"
-                    max="0.4"
-                    step="0.01"
+                    min="0.01"
+                    max="0.06"
+                    step="0.001"
                     value={baseSize}
                     onChange={(e) => setBaseSize(parseFloat(e.target.value))}
                     className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"

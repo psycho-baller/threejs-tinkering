@@ -129,19 +129,23 @@ function getPoseBones(poseType: number): Bone[] {
   }
 
   // Push all bones of the skeleton
-  bones.push({ id: "torso", start: torsoStart, end: torsoEnd, radius: 0.15, weight: 0.28 });
+  bones.push({ id: "torso", start: torsoStart, end: torsoEnd, radius: 0.15, weight: 0.24 });
   bones.push({ id: "head", start: headStart, end: headEnd, radius: 0.11, weight: 0.18 });
   bones.push({ id: "neck", start: neckStart, end: neckEnd, radius: 0.05, weight: 0.02 });
+
+  // Structural bridges to prevent skeletal gaps
+  bones.push({ id: "shoulders", start: lShoulder, end: rShoulder, radius: 0.08, weight: 0.04 });
+  bones.push({ id: "pelvis", start: lThighS, end: rThighS, radius: 0.10, weight: 0.04 });
 
   bones.push({ id: "l_upperarm", start: lShoulder, end: lElbow, radius: 0.045, weight: 0.06 });
   bones.push({ id: "l_lowerarm", start: lElbow, end: lWrist, radius: 0.035, weight: 0.06 });
   bones.push({ id: "r_upperarm", start: rShoulder, end: rElbow, radius: 0.045, weight: 0.06 });
   bones.push({ id: "r_lowerarm", start: rElbow, end: rWrist, radius: 0.035, weight: 0.06 });
 
-  bones.push({ id: "l_thigh", start: lThighS, end: lThighE, radius: 0.065, weight: 0.07 });
-  bones.push({ id: "l_shin", start: lShinS, end: lShinE, radius: 0.05, weight: 0.07 });
-  bones.push({ id: "r_thigh", start: rThighS, end: rThighE, radius: 0.065, weight: 0.07 });
-  bones.push({ id: "r_shin", start: rShinS, end: rShinE, radius: 0.05, weight: 0.07 });
+  bones.push({ id: "l_thigh", start: lThighS, end: lThighE, radius: 0.065, weight: 0.06 });
+  bones.push({ id: "l_shin", start: lShinS, end: lShinE, radius: 0.05, weight: 0.06 });
+  bones.push({ id: "r_thigh", start: rThighS, end: rThighE, radius: 0.065, weight: 0.06 });
+  bones.push({ id: "r_shin", start: rShinS, end: rShinE, radius: 0.05, weight: 0.06 });
 
   return bones;
 }
@@ -156,26 +160,83 @@ function sampleBonePoint(bone: Bone, out: { x: number; y: number; z: number }) {
   const lengthSq = dx * dx + dy * dy + dz * dz;
 
   if (lengthSq < 0.0001) {
-    // It's a sphere (like the head)
+    // It's a sphere (like the head) - shape it into a realistic head ellipsoid
     const u1 = Math.random();
     const u2 = Math.random();
     const theta = u1 * Math.PI * 2.0;
     const phi = Math.acos(2.0 * u2 - 1.0);
-    // Uniform volumetric sphere packing
+    // Uniform volumetric packing
     const r = radius * (0.8 + 0.2 * Math.pow(Math.random(), 0.3));
 
-    out.x = start.x + r * Math.sin(phi) * Math.cos(theta);
-    out.y = start.y + r * Math.sin(phi) * Math.sin(theta);
-    out.z = start.z + r * Math.cos(phi);
+    // Ellipsoid scaling: narrower left-to-right (0.92), taller vertically (1.25), deeper front-to-back (1.05)
+    out.x = start.x + r * Math.sin(phi) * Math.cos(theta) * 0.92;
+    out.y = start.y + r * Math.sin(phi) * Math.sin(theta) * 1.25;
+    out.z = start.z + r * Math.cos(phi) * 1.05;
     return;
   }
 
   // Parametric point along segment length
-  // We prefer points packed a bit around the center for volume, but fairly uniform
   const t = Math.random();
   const px = start.x + t * dx;
   const py = start.y + t * dy;
   const pz = start.z + t * dz;
+
+  // Custom anatomical shape factor and directional scales based on bone type
+  let shapeFactor = 1.0;
+  let scaleX = 1.0;
+  let scaleZ = 1.0;
+
+  if (bone.id === "torso") {
+    // Torso: t=0 is pelvis, t=1 is neck
+    // Tapers at the waist, expands at chest, narrows slightly at collar/neck base
+    if (t < 0.2) {
+      const localT = t / 0.2;
+      shapeFactor = 1.15 * (1 - localT) + 0.95 * localT;
+    } else if (t < 0.45) {
+      const localT = (t - 0.2) / 0.25;
+      shapeFactor = 0.95 * (1 - localT) + 0.85 * localT;
+    } else if (t < 0.8) {
+      const localT = (t - 0.45) / 0.35;
+      shapeFactor = 0.85 * (1 - localT) + 1.28 * localT;
+    } else {
+      const localT = (t - 0.8) / 0.2;
+      shapeFactor = 1.28 * (1 - localT) + 0.8 * localT;
+    }
+    // Flatten torso to represent a ribcage/chest (wider side-to-side, flatter front-to-back)
+    scaleX = 1.35;
+    scaleZ = 0.85;
+  } else if (bone.id === "shoulders") {
+    // Shoulders horizontal bridge: flatter vertically/depth-wise
+    scaleX = 1.0;
+    scaleZ = 0.9;
+  } else if (bone.id === "pelvis") {
+    // Pelvis horizontal bridge
+    scaleX = 1.0;
+    scaleZ = 0.9;
+  } else if (bone.id === "l_thigh" || bone.id === "r_thigh") {
+    // Thighs: taper from hip (1.2) to knee (0.8)
+    shapeFactor = 1.2 - 0.4 * t;
+  } else if (bone.id === "l_shin" || bone.id === "r_shin") {
+    // Shins: calf muscle flares out around t=0.3 and tapers to thin ankle at t=1.0
+    if (t < 0.3) {
+      const localT = t / 0.3;
+      shapeFactor = 0.9 * (1 - localT) + 1.25 * localT;
+    } else if (t < 0.7) {
+      const localT = (t - 0.3) / 0.4;
+      shapeFactor = 1.25 * (1 - localT) + 0.8 * localT;
+    } else {
+      const localT = (t - 0.7) / 0.3;
+      shapeFactor = 0.8 * (1 - localT) + 0.58 * localT;
+    }
+  } else if (bone.id === "l_upperarm" || bone.id === "r_upperarm") {
+    // Upper arms: biceps bulge in the middle, slightly taper at elbow
+    shapeFactor = 1.1 * (1 - t) + 0.85 * t + 0.15 * Math.sin(t * Math.PI);
+  } else if (bone.id === "l_lowerarm" || bone.id === "r_lowerarm") {
+    // Lower arms: taper to wrist
+    shapeFactor = 1.05 * (1 - t) + 0.65 * t;
+  } else if (bone.id === "neck") {
+    shapeFactor = 1.0 - 0.15 * t;
+  }
 
   // Make a unit vector perpendicular to the segment (dx, dy, dz)
   let rx = Math.random() - 0.5;
@@ -218,16 +279,22 @@ function sampleBonePoint(bone: Bone, out: { x: number; y: number; z: number }) {
 
   // Generate random radial angle and radial radius
   const angle = Math.random() * Math.PI * 2.0;
-  // Dynamic thickness - slightly thinner in limbs, volumetric
-  // Radial scaling: (0.7 + 0.3 * rand) gives a nice solid shell and glowing inner vapor
-  const rScale = radius * (0.65 + 0.35 * Math.sqrt(Math.random()));
+  // Apply the custom shape factor to the base radius
+  const baseRadius = radius * shapeFactor;
+  // Radial scaling: (0.65 + 0.35 * sqrt(rand)) gives a nice solid shell and glowing inner vapor
+  const rScale = baseRadius * (0.65 + 0.35 * Math.sqrt(Math.random()));
 
   const cosAngle = Math.cos(angle);
   const sinAngle = Math.sin(angle);
 
-  out.x = px + (pxVal * cosAngle + qxVal * sinAngle) * rScale;
-  out.y = py + (pyVal * cosAngle + qyVal * sinAngle) * rScale;
-  out.z = pz + (pzVal * cosAngle + qzVal * sinAngle) * rScale;
+  // Apply scales on local axes
+  const ox = (pxVal * cosAngle + qxVal * sinAngle) * rScale;
+  const oy = (pyVal * cosAngle + qyVal * sinAngle) * rScale;
+  const oz = (pzVal * cosAngle + qzVal * sinAngle) * rScale;
+
+  out.x = px + ox * scaleX;
+  out.y = py + oy;
+  out.z = pz + oz * scaleZ;
 }
 
 // Sets up layout and parameters of the 15 figures in our crowd simulation
@@ -326,8 +393,8 @@ export function generateCrowdTextures(width: number, height: number): {
     for (let i = 0; i < count; i++) {
       const idx = particleStart + i;
 
-      // Select segment based on bone weight
-      const randValue = Math.random();
+      // Select segment based on bone weight, using currentSum to support arbitrary total weight
+      const randValue = Math.random() * currentSum;
       let chosenBone = bonesList[bonesList.length - 1];
       for (let b = 0; b < bonesList.length; b++) {
         if (randValue <= cumulativeWeights[b]) {
