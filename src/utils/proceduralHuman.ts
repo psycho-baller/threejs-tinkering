@@ -11,6 +11,7 @@ export interface FigureLayout {
   bodyType: "average" | "volumetric" | "athletic" | "skinny";
   gender: "male" | "female";
   hairStyle: "short" | "long" | "bald";
+  expression: "happy" | "sad" | "content" | "excited";
 }
 
 // Helper to define joint coordinates in 3D
@@ -162,9 +163,15 @@ function getPoseBones(poseType: number): Bone[] {
     rWrist.z + (rForearmDz / rForearmLen) * 0.24
   );
 
+  // Extend ankle (shin end) to find foot end point (toes)
+  // Left foot points slightly outward (negative X) and right foot points slightly outward (positive X)
+  // Both point forward (+Z) and slightly down (-Y) to form a natural foot posture
+  const lFootEnd = createJoint(lShinE.x - 0.02, lShinE.y - 0.05, lShinE.z + 0.16);
+  const rFootEnd = createJoint(rShinE.x + 0.02, rShinE.y - 0.05, rShinE.z + 0.16);
+
   // Push all bones of the skeleton
   bones.push({ id: "torso", start: torsoStart, end: torsoEnd, radius: 0.15, weight: 0.24 });
-  bones.push({ id: "head", start: headStart, end: headEnd, radius: 0.11, weight: 0.18 });
+  bones.push({ id: "head", start: headStart, end: headEnd, radius: 0.13, weight: 0.22 });
   bones.push({ id: "neck", start: neckStart, end: neckEnd, radius: 0.05, weight: 0.02 });
 
   // Structural bridges to prevent skeletal gaps
@@ -184,6 +191,9 @@ function getPoseBones(poseType: number): Bone[] {
   bones.push({ id: "r_thigh", start: rThighS, end: rThighE, radius: 0.075, weight: 0.06 });
   bones.push({ id: "r_shin", start: rShinS, end: rShinE, radius: 0.055, weight: 0.06 });
 
+  bones.push({ id: "l_foot", start: lShinE, end: lFootEnd, radius: 0.038, weight: 0.04 });
+  bones.push({ id: "r_foot", start: rShinE, end: rFootEnd, radius: 0.038, weight: 0.04 });
+
   return bones;
 }
 
@@ -202,44 +212,96 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
     const rPart = Math.random();
     
     // We shape the head dimensions based on body type
-    let hx = 0.92;
+    let hx = 0.95;
     let hy = 1.25;
-    let hz = 1.10; // Increased base depth to prevent flatness
+    let hz = 1.28; // Increased for more depth from the side!
 
     if (bodyType === "volumetric") {
-      hx = 1.02;
-      hy = 1.18;
-      hz = 1.12;
+      hx = 1.05;
+      hy = 1.20;
+      hz = 1.32;
     } else if (bodyType === "athletic") {
-      hx = 0.95;
+      hx = 0.98;
       hy = 1.22;
-      hz = 1.12;
+      hz = 1.30;
     } else if (bodyType === "skinny") {
-      hx = 0.90;
-      hy = 1.26;
-      hz = 1.05;
+      hx = 0.92;
+      hy = 1.28;
+      hz = 1.22;
     }
 
     if (rPart < 0.05) {
-      // 1. EYES (5% of head particles)
+      // 1. EYES & EYEBROWS (5% of head particles)
       const isLeft = rPart < 0.025;
       const eyeSide = isLeft ? -1.0 : 1.0;
       
-      // Symmetrical eyes positioned on the front surface of the skull
-      const eyeAngleX = eyeSide * 0.32; // lateral offset angle
-      const eyeAngleY = 0.15;           // height angle (above center)
+      const isEyebrow = Math.random() < 0.35; // 35% of this budget is for eyebrows
       
-      const ex = radius * Math.sin(eyeAngleX) * Math.cos(eyeAngleY) * hx;
-      const ey = radius * Math.sin(eyeAngleY) * hy;
-      const ez = radius * Math.cos(eyeAngleX) * Math.cos(eyeAngleY) * hz;
-      
-      const u = Math.random() * Math.PI * 2;
-      const rEye = 0.012 * Math.sqrt(Math.random());
-      
-      out.x = start.x + ex + Math.cos(u) * rEye;
-      out.y = start.y + ey + Math.sin(u) * rEye * 0.6; // flat ellipse shape
-      out.z = start.z + ez + (Math.random() - 0.5) * 0.003;
-      return;
+      if (isEyebrow) {
+        // EYEBROWS
+        const tBrow = (Math.random() - 0.5) * 2.0; // -1 (inner/nose) to +1 (outer/temple)
+        
+        // Splay the eyebrow laterally
+        const browAngleX = eyeSide * (0.32 + tBrow * 0.12);
+        
+        // Base eyebrow height angle
+        let browAngleY = 0.21;
+        
+        if (layout.expression === "excited") {
+          // Arched and raised
+          browAngleY = 0.24 + (1.0 - tBrow * tBrow) * 0.03;
+        } else if (layout.expression === "happy") {
+          // Normal raised curve
+          browAngleY = 0.22 + (1.0 - tBrow * tBrow) * 0.015;
+        } else if (layout.expression === "sad") {
+          // Slanted: inner corner (tBrow = -1) is raised, outer corner (tBrow = 1) is lowered
+          browAngleY = 0.22 - tBrow * 0.035;
+        } else { // content
+          // Relaxed
+          browAngleY = 0.20 + (1.0 - tBrow * tBrow) * 0.01;
+        }
+        
+        const bx = radius * Math.sin(browAngleX) * Math.cos(browAngleY) * hx;
+        const by = radius * Math.sin(browAngleY) * hy;
+        const bz = radius * Math.cos(browAngleX) * Math.cos(browAngleY) * hz;
+        
+        out.x = start.x + bx;
+        out.y = start.y + by + (Math.random() - 0.5) * 0.002;
+        out.z = start.z + bz * 1.02 + (Math.random() - 0.5) * 0.002;
+        return;
+      } else {
+        // EYES
+        const eyeAngleX = eyeSide * 0.32; // lateral offset angle
+        const eyeAngleY = 0.15;           // height angle (above center)
+        
+        const ex = radius * Math.sin(eyeAngleX) * Math.cos(eyeAngleY) * hx;
+        const ey = radius * Math.sin(eyeAngleY) * hy;
+        const ez = radius * Math.cos(eyeAngleX) * Math.cos(eyeAngleY) * hz;
+        
+        const u = Math.random() * Math.PI * 2;
+        
+        // Expression modifiers for eyes
+        let rEye = 0.012 * Math.sqrt(Math.random());
+        let yScale = 0.6; // flat ellipse shape
+        let tilt = 0.0;
+        
+        if (layout.expression === "excited") {
+          rEye = 0.015 * Math.sqrt(Math.random());
+          yScale = 0.95; // wide open eyes
+        } else if (layout.expression === "happy") {
+          yScale = 0.35; // squinting happy eyes
+        } else if (layout.expression === "sad") {
+          yScale = 0.55;
+          // Tilt outer edges down
+          const localX = Math.cos(u) * rEye;
+          tilt = -0.2 * localX * eyeSide;
+        }
+        
+        out.x = start.x + ex + Math.cos(u) * rEye;
+        out.y = start.y + ey + Math.sin(u) * rEye * yScale + tilt + (Math.random() - 0.5) * 0.002;
+        out.z = start.z + ez + (Math.random() - 0.5) * 0.003;
+        return;
+      }
       
     } else if (rPart < 0.09) {
       // 2. NOSE (4% of head particles)
@@ -257,19 +319,47 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
       
     } else if (rPart < 0.13) {
       // 3. MOUTH (4% of head particles)
-      const mouthWidth = 0.035;
+      const isExcited = layout.expression === "excited";
+      const mouthWidth = isExcited ? 0.042 : 0.035;
       const mouthY = -0.06;
       
       const zSurface = radius * Math.sqrt(1.0 - Math.pow(mouthY / (radius * hy), 2)) * hz;
       
-      // Curved smiling lips
       const tMouth = (Math.random() - 0.5) * 2.0; // -1 to +1
       const mx = tMouth * mouthWidth;
-      const my = mouthY + (1.0 - tMouth * tMouth) * 0.005; // smile curve
+      
+      let my = mouthY;
+      let verticalSpread = 0.0;
+      let zOffset = 0.0;
+      
+      if (layout.expression === "happy") {
+        // Pronounced smile curve (corners at mouthY + 0.008, center at mouthY - 0.005)
+        my = mouthY - 0.005 + tMouth * tMouth * 0.013;
+        verticalSpread = (Math.random() - 0.5) * 0.003;
+      } else if (layout.expression === "sad") {
+        // Pronounced frown curve (corners at mouthY - 0.007, center at mouthY + 0.005)
+        my = mouthY + 0.005 - tMouth * tMouth * 0.012;
+        verticalSpread = (Math.random() - 0.5) * 0.003;
+      } else if (layout.expression === "excited") {
+        // Wide open mouth! Sample a 2D region bounded by upper and lower lips
+        const yUpper = mouthY + 0.004 - 0.004 * tMouth * tMouth;
+        const yLower = mouthY - 0.018 + 0.006 * tMouth * tMouth;
+        const v = Math.random();
+        my = yLower + v * (yUpper - yLower);
+        
+        // Push interior particles slightly back to create a 3D oral cavity depth!
+        const centerFactor = 1.0 - Math.abs(tMouth); // 1.0 at center, 0.0 at corners
+        zOffset = -centerFactor * Math.random() * 0.008;
+        verticalSpread = (Math.random() - 0.5) * 0.001;
+      } else { // content
+        // Gentle smile curve
+        my = mouthY - 0.001 + tMouth * tMouth * 0.004;
+        verticalSpread = (Math.random() - 0.5) * 0.002;
+      }
       
       out.x = start.x + mx;
-      out.y = start.y + my * hy + (Math.random() - 0.5) * 0.004;
-      out.z = start.z + zSurface * 1.01 + (Math.random() - 0.5) * 0.003;
+      out.y = start.y + my * hy + verticalSpread;
+      out.z = start.z + zSurface * 1.01 + zOffset + (Math.random() - 0.5) * 0.002;
       return;
       
     } else if (rPart < 0.19) {
@@ -290,48 +380,132 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
       const isFemale = layout.gender === "female";
       const style = layout.hairStyle;
       
-      if (style === "long" && Math.random() < 0.65) {
-        // Flowing long hair strands (sides and back, hanging down to shoulders)
-        const tHair = Math.random(); // 0 is shoulder-level, 1 is top of head
-        const strandY = start.y + 0.08 - tHair * 0.38; // flows down
-        
-        // Hair wraps around back/sides
-        const angle = Math.PI * (0.6 + Math.random() * 0.8);
-        const side = Math.random() < 0.5 ? -1.0 : 1.0;
-        const hairR = radius * 1.08 + (1.0 - tHair) * 0.02; // tapers/flares slightly
-        
-        out.x = start.x + Math.sin(angle * side) * hairR * hx;
-        out.y = strandY;
-        out.z = start.z + Math.cos(angle * side) * hairR * hz - (1.0 - tHair) * 0.01;
-        
-        // Add subtle waves
-        out.x += Math.sin(strandY * 20.0) * 0.006;
-        out.z += Math.cos(strandY * 20.0) * 0.006;
-        return;
-      } else {
-        // Short hair / Skull cap (top/back and side temples)
-        const hAngle = Math.random() * Math.PI * 2.0;
-        const hPhi = Math.acos(Math.random() * 0.9); // top hemisphere
-        
-        const hairR = radius * (1.02 + 0.08 * Math.pow(Math.random(), 0.5));
-        
-        const hxVal = hairR * Math.sin(hPhi) * Math.cos(hAngle) * hx;
-        const hyVal = hairR * Math.sin(hPhi) * Math.sin(hAngle) * hy;
-        const hzVal = hairR * Math.cos(hPhi) * hz;
-        
-        // Create hairline: restrict hair from front-face area
-        if (hzVal > 0.03 * hz && hyVal < 0.06 * hy) {
-          // Reflect to back
-          out.x = start.x + hxVal;
-          out.y = start.y + hyVal;
-          out.z = start.z - Math.abs(hzVal);
+      if (style === "long") {
+        if (isFemale) {
+          // Female Long Hair: flowing long waves down to chest/shoulders
+          if (Math.random() < 0.70) {
+            const tHair = Math.random(); // 0 is shoulder-level, 1 is top of head
+            const strandY = start.y + 0.08 - tHair * 0.42; // flows lower
+            
+            // Hair wraps around back/sides but also flows slightly forward on shoulders
+            const angle = Math.PI * (0.55 + Math.random() * 0.9); // wrap around sides
+            const side = Math.random() < 0.5 ? -1.0 : 1.0;
+            const hairR = radius * (1.12 + (1.0 - tHair) * 0.06); 
+            
+            out.x = start.x + Math.sin(angle * side) * hairR * hx;
+            out.y = strandY;
+            // Let it flow slightly forward at the bottom
+            const forwardFlow = (1.0 - tHair) * 0.03;
+            out.z = start.z + Math.cos(angle * side) * hairR * hz + forwardFlow;
+            
+            // Add waves
+            out.x += Math.sin(strandY * 25.0) * 0.008;
+            out.z += Math.cos(strandY * 25.0) * 0.008;
+            return;
+          }
         } else {
-          out.x = start.x + hxVal;
-          out.y = start.y + hyVal;
-          out.z = start.z + hzVal;
+          // Male Long Hair: rocker hair or man bun!
+          if (Math.random() < 0.50) {
+            // Rocker hair: shoulder length, less volume, straighter
+            const tHair = Math.random();
+            const strandY = start.y + 0.05 - tHair * 0.35;
+            const angle = Math.PI * (0.6 + Math.random() * 0.8);
+            const side = Math.random() < 0.5 ? -1.0 : 1.0;
+            const hairR = radius * 1.10;
+            out.x = start.x + Math.sin(angle * side) * hairR * hx;
+            out.y = strandY;
+            out.z = start.z + Math.cos(angle * side) * hairR * hz;
+            return;
+          } else {
+            // Man Bun! A tight bun at the upper back of the head
+            const bunRadius = 0.04 * radius;
+            const uBun = Math.random() * Math.PI * 2;
+            const vBun = Math.acos(2.0 * Math.random() - 1.0);
+            const rBun = bunRadius * (0.8 + 0.25 * Math.random());
+            
+            out.x = start.x + Math.sin(vBun) * Math.cos(uBun) * rBun;
+            out.y = start.y + 0.06 * hy + Math.sin(vBun) * Math.sin(uBun) * rBun;
+            out.z = start.z - radius * hz * 1.08 - Math.abs(Math.cos(vBun)) * rBun;
+            return;
+          }
         }
-        return;
+      } else if (style === "short") {
+        if (!isFemale) {
+          // Male Short Hair: Spiky / textured crop!
+          const theta = Math.random() * Math.PI * 2.0;
+          const ySphere = -0.3 + 1.3 * Math.random(); // crop is higher than bob
+          const rSphere = Math.sqrt(Math.max(0.0, 1.0 - ySphere * ySphere));
+          
+          let hairR = radius * 1.05;
+          if (Math.random() < 0.35 && ySphere > 0.2) {
+            // Add spikes on top
+            hairR += radius * 0.07 * Math.pow(Math.random(), 1.5);
+          }
+          
+          const hxVal = hairR * rSphere * Math.cos(theta) * hx;
+          const hyVal = hairR * ySphere * hy;
+          const hzVal = hairR * rSphere * Math.sin(theta) * hz;
+          
+          if (hzVal > 0.02 * hz && hyVal < 0.10 * hy) {
+            out.x = start.x + hxVal;
+            out.y = start.y + hyVal;
+            out.z = start.z - Math.abs(hzVal);
+          } else {
+            out.x = start.x + hxVal;
+            out.y = start.y + hyVal;
+            out.z = start.z + hzVal;
+          }
+          return;
+        } else {
+          // Female Short Hair: Stylish Bob Cut
+          const theta = Math.random() * Math.PI * 2.0;
+          const ySphere = -0.22 + 1.22 * Math.random();
+          const rSphere = Math.sqrt(Math.max(0.0, 1.0 - ySphere * ySphere));
+          
+          let hairR = radius * (1.08 + 0.03 * Math.random());
+          // Flare the sides out slightly near the bottom (bob style)
+          if (ySphere < 0.0) {
+            hairR *= (1.0 - ySphere * 0.10);
+          }
+          
+          const hxVal = hairR * rSphere * Math.cos(theta) * hx;
+          const hyVal = hairR * ySphere * hy;
+          const hzVal = hairR * rSphere * Math.sin(theta) * hz;
+          
+          // Face clearance: bob frames the face
+          if (hzVal > 0.01 * hz && hyVal < 0.08 * hy && Math.abs(hxVal) < 0.7 * radius * hx) {
+            out.x = start.x + hxVal;
+            out.y = start.y + hyVal;
+            out.z = start.z - Math.abs(hzVal);
+          } else {
+            out.x = start.x + hxVal;
+            out.y = start.y + hyVal;
+            out.z = start.z + hzVal;
+          }
+          return;
+        }
       }
+      
+      // Fallback/Skull cap top section for long hair styles
+      const theta = Math.random() * Math.PI * 2.0;
+      const ySphere = -0.35 + 1.35 * Math.random();
+      const rSphere = Math.sqrt(Math.max(0.0, 1.0 - ySphere * ySphere));
+      const hairR = radius * (1.05 + 0.08 * Math.pow(Math.random(), 0.5));
+      
+      const hxVal = hairR * rSphere * Math.cos(theta) * hx;
+      const hyVal = hairR * ySphere * hy;
+      const hzVal = hairR * rSphere * Math.sin(theta) * hz;
+      
+      if (hzVal > 0.02 * hz && hyVal < 0.06 * hy) {
+        out.x = start.x + hxVal;
+        out.y = start.y + hyVal;
+        out.z = start.z - Math.abs(hzVal);
+      } else {
+        out.x = start.x + hxVal;
+        out.y = start.y + hyVal;
+        out.z = start.z + hzVal;
+      }
+      return;
     }
     
     // 6. SKULL BASE (Fallback and remaining particles)
@@ -352,9 +526,9 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
       sz *= taper;
     }
 
-    // Facial plane flattening: slightly flatten front surface
+    // Facial plane flattening: slightly flatten front surface (subtle to preserve 3D depth from sides)
     if (sz > 0.04 * hz) {
-      sz = 0.04 * hz + (sz - 0.04 * hz) * 0.65;
+      sz = 0.04 * hz + (sz - 0.04 * hz) * 0.88;
     }
 
     out.x = start.x + sx;
@@ -471,6 +645,7 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
   // Custom anatomical shape factor and directional scales based on bone type
   let shapeFactor = 1.0;
   let scaleX = 1.0;
+  let scaleY = 1.0;
   let scaleZ = 1.0;
 
   if (bone.id === "torso") {
@@ -510,6 +685,12 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
       shapeFactor = 0.8 * (1 - localT) + 0.58 * localT;
     }
     scaleZ = 1.05;
+  } else if (bone.id === "l_foot" || bone.id === "r_foot") {
+    // Foot shape: tapers slightly from ankle/heel (t=0) to toes (t=1)
+    shapeFactor = 1.0 - 0.25 * t;
+    scaleX = 1.35; // make it wider laterally
+    scaleY = 0.65; // flatten it vertically
+    scaleZ = 1.0;
   } else if (bone.id === "l_upperarm" || bone.id === "r_upperarm") {
     shapeFactor = 1.1 * (1 - t) + 0.85 * t + 0.15 * Math.sin(t * Math.PI);
   } else if (bone.id === "l_lowerarm" || bone.id === "r_lowerarm") {
@@ -624,49 +805,49 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
   const oz = (pzVal * cosAngle + qzVal * sinAngle) * rScale;
 
   out.x = px + ox * scaleX;
-  out.y = py + oy;
+  out.y = py + oy * scaleY;
   out.z = pz + oz * scaleZ;
 }
 
 export const CROWD_LAYOUTS: FigureLayout[] = [
   // 0. The Standout Figure (Centered, larger, facing camera!)
-  { poseType: 0, offsetX: 0, offsetY: -1.0, offsetZ: 0.0, rotationY: 0.0, scale: 1.18, isStandout: true, bodyType: "athletic", gender: "male", hairStyle: "short" },
+  { poseType: 0, offsetX: 0, offsetY: -1.0, offsetZ: 0.0, rotationY: 0.0, scale: 1.18, isStandout: true, bodyType: "athletic", gender: "male", hairStyle: "short", expression: "excited" },
   
   // 1. Inner Circle Background Left
-  { poseType: 1, offsetX: -1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: 0.35, scale: 1.1, isStandout: false, bodyType: "volumetric", gender: "female", hairStyle: "long" },
+  { poseType: 1, offsetX: -1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: 0.35, scale: 1.1, isStandout: false, bodyType: "volumetric", gender: "female", hairStyle: "long", expression: "happy" },
   // 2. Inner Circle Background Right
-  { poseType: 2, offsetX: 1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: -0.35, scale: 1.1, isStandout: false, bodyType: "skinny", gender: "male", hairStyle: "short" },
+  { poseType: 2, offsetX: 1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: -0.35, scale: 1.1, isStandout: false, bodyType: "skinny", gender: "male", hairStyle: "short", expression: "content" },
   
   // 3. Middle Left Ground
-  { poseType: 3, offsetX: -3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: 0.55, scale: 1.08, isStandout: false, bodyType: "average", gender: "female", hairStyle: "long" },
+  { poseType: 3, offsetX: -3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: 0.55, scale: 1.08, isStandout: false, bodyType: "average", gender: "female", hairStyle: "long", expression: "happy" },
   // 4. Middle Right Ground
-  { poseType: 4, offsetX: 3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: -0.55, scale: 1.08, isStandout: false, bodyType: "athletic", gender: "male", hairStyle: "short" },
+  { poseType: 4, offsetX: 3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: -0.55, scale: 1.08, isStandout: false, bodyType: "athletic", gender: "male", hairStyle: "short", expression: "excited" },
   
   // 5. Deep Center Left
-  { poseType: 5, offsetX: -1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: 0.15, scale: 1.05, isStandout: false, bodyType: "volumetric", gender: "male", hairStyle: "short" },
+  { poseType: 5, offsetX: -1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: 0.15, scale: 1.05, isStandout: false, bodyType: "volumetric", gender: "male", hairStyle: "short", expression: "sad" },
   // 6. Deep Center Right
-  { poseType: 6, offsetX: 1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: -0.15, scale: 1.05, isStandout: false, bodyType: "skinny", gender: "female", hairStyle: "long" },
+  { poseType: 6, offsetX: 1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: -0.15, scale: 1.05, isStandout: false, bodyType: "skinny", gender: "female", hairStyle: "long", expression: "content" },
 
   // 7. Middle Far Left
-  { poseType: 7, offsetX: -5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: 0.70, scale: 1.0, isStandout: false, bodyType: "average", gender: "male", hairStyle: "short" },
+  { poseType: 7, offsetX: -5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: 0.70, scale: 1.0, isStandout: false, bodyType: "average", gender: "male", hairStyle: "short", expression: "happy" },
   // 8. Middle Far Right
-  { poseType: 0, offsetX: 5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: -0.70, scale: 1.0, isStandout: false, bodyType: "athletic", gender: "female", hairStyle: "short" },
+  { poseType: 0, offsetX: 5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: -0.70, scale: 1.0, isStandout: false, bodyType: "athletic", gender: "female", hairStyle: "short", expression: "sad" },
 
   // 9. Deep Far Left
-  { poseType: 1, offsetX: -2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: 0.30, scale: 0.98, isStandout: false, bodyType: "volumetric", gender: "female", hairStyle: "long" },
+  { poseType: 1, offsetX: -2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: 0.30, scale: 0.98, isStandout: false, bodyType: "volumetric", gender: "female", hairStyle: "long", expression: "excited" },
   // 10. Deep Far Right
-  { poseType: 2, offsetX: 2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: -0.30, scale: 0.98, isStandout: false, bodyType: "skinny", gender: "male", hairStyle: "bald" },
+  { poseType: 2, offsetX: 2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: -0.30, scale: 0.98, isStandout: false, bodyType: "skinny", gender: "male", hairStyle: "bald", expression: "content" },
 
   // 11. Core Back Projection
-  { poseType: 3, offsetX: 0.0, offsetY: -1.0, offsetZ: -5.5, rotationY: 0.0, scale: 0.95, isStandout: false, bodyType: "average", gender: "female", hairStyle: "long" },
+  { poseType: 3, offsetX: 0.0, offsetY: -1.0, offsetZ: -5.5, rotationY: 0.0, scale: 0.95, isStandout: false, bodyType: "average", gender: "female", hairStyle: "long", expression: "happy" },
   
   // 12. Distant Deep Left
-  { poseType: 4, offsetX: -4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: 0.50, scale: 0.95, isStandout: false, bodyType: "athletic", gender: "male", hairStyle: "short" },
+  { poseType: 4, offsetX: -4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: 0.50, scale: 0.95, isStandout: false, bodyType: "athletic", gender: "male", hairStyle: "short", expression: "excited" },
   // 13. Distant Deep Right
-  { poseType: 5, offsetX: 4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: -0.50, scale: 0.95, isStandout: false, bodyType: "volumetric", gender: "female", hairStyle: "long" },
+  { poseType: 5, offsetX: 4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: -0.50, scale: 0.95, isStandout: false, bodyType: "volumetric", gender: "female", hairStyle: "long", expression: "sad" },
 
   // 14. Outer Wing Background Left
-  { poseType: 6, offsetX: -6.4, offsetY: -1.0, offsetZ: -4.5, rotationY: 0.85, scale: 0.9, isStandout: false, bodyType: "skinny", gender: "female", hairStyle: "long" },
+  { poseType: 6, offsetX: -6.4, offsetY: -1.0, offsetZ: -4.5, rotationY: 0.85, scale: 0.9, isStandout: false, bodyType: "skinny", gender: "female", hairStyle: "long", expression: "content" },
 ];
 
 /**
