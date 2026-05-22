@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Sparkles, Sliders, RefreshCw, Activity, HelpCircle, Compass, Flame, Info, EyeOff, Eye } from "lucide-react";
+import { useState } from "react";
+import { Sparkles, Sliders, RefreshCw, Activity, Compass, Flame, Info, EyeOff, Eye } from "lucide-react";
 import Scene from "./components/Scene";
 
 // Curated Luminous Amber & Gold Color Palettes

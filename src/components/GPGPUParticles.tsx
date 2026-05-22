@@ -1,9 +1,19 @@
+import { Html } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { generateCrowdTextures } from "../utils/proceduralHuman";
 import { simulationVertexShader, simulationFragmentShader } from "../shaders/simulationShader";
 import { renderVertexShader, renderFragmentShader } from "../shaders/renderShader";
+
+const TEXTURE_WIDTH = 512;
+const TEXTURE_HEIGHT = 1024;
+const PARTICLE_COUNT = TEXTURE_WIDTH * TEXTURE_HEIGHT;
+const STANDOUT_PARTICLE_COUNT = 65_536;
+
+interface PositionTextureData {
+  targetPositions: Float32Array;
+  initialPositions: Float32Array;
+}
 
 interface GPGPUParticlesProps {
   chaos: number;
@@ -19,7 +29,98 @@ interface GPGPUParticlesProps {
   resetSignal: number;
 }
 
-export default function GPGPUParticles({
+interface GPGPUParticleSimulationProps extends GPGPUParticlesProps {
+  textureData: PositionTextureData;
+  textureType: THREE.TextureDataType;
+}
+
+function getSupportedGpgpuTextureType(gl: THREE.WebGLRenderer): THREE.TextureDataType | null {
+  const supportsFloatTextures = gl.capabilities.isWebGL2 || Boolean(gl.extensions.get("OES_texture_float"));
+  const supportsFloatRenderTargets = Boolean(gl.extensions.get("EXT_color_buffer_float"));
+  const supportsHalfFloatRenderTargets = Boolean(gl.extensions.get("EXT_color_buffer_half_float"));
+
+  if (supportsFloatTextures && supportsFloatRenderTargets) {
+    return THREE.FloatType;
+  }
+
+  if (supportsFloatTextures && supportsHalfFloatRenderTargets) {
+    return THREE.HalfFloatType;
+  }
+
+  return null;
+}
+
+function createPositionTexture(data: Float32Array) {
+  const texture = new THREE.DataTexture(
+    data,
+    TEXTURE_WIDTH,
+    TEXTURE_HEIGHT,
+    THREE.RGBAFormat,
+    THREE.FloatType
+  );
+
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+
+  return texture;
+}
+
+function GpuStatusMessage({ children }: { children: string }) {
+  return (
+    <Html center>
+      <div className="max-w-xs rounded-lg border border-amber-500/40 bg-zinc-950/85 px-4 py-3 text-center text-xs font-mono text-amber-100 shadow-xl backdrop-blur-md">
+        {children}
+      </div>
+    </Html>
+  );
+}
+
+function CrowdTextureLoader(props: GPGPUParticlesProps & { textureType: THREE.TextureDataType }) {
+  const [textureData, setTextureData] = useState<PositionTextureData | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const worker = new Worker(new URL("../workers/crowdTextureWorker.ts", import.meta.url), {
+      type: "module",
+    });
+
+    worker.onmessage = (event: MessageEvent<PositionTextureData>) => {
+      if (!cancelled) {
+        setTextureData(event.data);
+      }
+    };
+
+    worker.onerror = () => {
+      if (!cancelled) {
+        setLoadError("Unable to prepare the particle texture data.");
+      }
+      worker.terminate();
+    };
+
+    worker.postMessage({ width: TEXTURE_WIDTH, height: TEXTURE_HEIGHT });
+
+    return () => {
+      cancelled = true;
+      worker.terminate();
+    };
+  }, []);
+
+  if (loadError) {
+    return <GpuStatusMessage>{loadError}</GpuStatusMessage>;
+  }
+
+  if (!textureData) {
+    return <GpuStatusMessage>Preparing particle field...</GpuStatusMessage>;
+  }
+
+  return <GPGPUParticleSimulation {...props} textureData={textureData} />;
+}
+
+function GPGPUParticleSimulation({
   chaos,
   noiseStrength,
   noiseFrequency,
@@ -30,88 +131,49 @@ export default function GPGPUParticles({
   amberColor,
   goldColor,
   standoutColor,
-  resetSignal
-}: GPGPUParticlesProps) {
+  resetSignal,
+  textureData,
+  textureType,
+}: GPGPUParticleSimulationProps) {
   const { gl } = useThree();
 
-  const width = 512;
-  const height = 1024;
-  const size = width * height; // 524,288 particles
-
-  // 1. Generate Coordinates & Textures
-  const { targetPositions, initialPositions, targetTexture, initialTexture } = useMemo(() => {
-    const { targetPositions, initialPositions } = generateCrowdTextures(width, height);
-
-    // Convert arrays into Float32 DataTextures
-    const targetTex = new THREE.DataTexture(
-      targetPositions,
-      width,
-      height,
-      THREE.RGBAFormat,
-      THREE.FloatType
-    );
-    targetTex.minFilter = THREE.NearestFilter;
-    targetTex.magFilter = THREE.NearestFilter;
-    targetTex.wrapS = THREE.ClampToEdgeWrapping;
-    targetTex.wrapT = THREE.ClampToEdgeWrapping;
-    targetTex.needsUpdate = true;
-
-    const initialTex = new THREE.DataTexture(
-      initialPositions,
-      width,
-      height,
-      THREE.RGBAFormat,
-      THREE.FloatType
-    );
-    initialTex.minFilter = THREE.NearestFilter;
-    initialTex.magFilter = THREE.NearestFilter;
-    initialTex.wrapS = THREE.ClampToEdgeWrapping;
-    initialTex.wrapT = THREE.ClampToEdgeWrapping;
-    initialTex.needsUpdate = true;
-
+  const { targetTexture, initialTexture } = useMemo(() => {
     return {
-      targetPositions,
-      initialPositions,
-      targetTexture: targetTex,
-      initialTexture: initialTex
+      targetTexture: createPositionTexture(textureData.targetPositions),
+      initialTexture: createPositionTexture(textureData.initialPositions),
     };
-  }, []);
+  }, [textureData]);
 
-  // 2. Initialize GPGPU RenderTargets (Ping-Pong buffers)
   const fbo = useMemo(() => {
-    const options = {
+    const options: THREE.RenderTargetOptions = {
       minFilter: THREE.NearestFilter,
       magFilter: THREE.NearestFilter,
       wrapS: THREE.ClampToEdgeWrapping,
       wrapT: THREE.ClampToEdgeWrapping,
       format: THREE.RGBAFormat,
-      type: THREE.FloatType, // Full-float precision for GPGPU equations
+      type: textureType,
       depthBuffer: false,
       stencilBuffer: false,
     };
 
-    const rt0 = new THREE.WebGLRenderTarget(width, height, options);
-    const rt1 = new THREE.WebGLRenderTarget(width, height, options);
+    const rt0 = new THREE.WebGLRenderTarget(TEXTURE_WIDTH, TEXTURE_HEIGHT, options);
+    const rt1 = new THREE.WebGLRenderTarget(TEXTURE_WIDTH, TEXTURE_HEIGHT, options);
 
     return { rt0, rt1 };
-  }, []);
+  }, [textureType]);
 
-  // 3. Create the GPGPU Simulation Rig
   const sim = useMemo(() => {
     const simScene = new THREE.Scene();
     const simCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
-    // Simulation Material containing custom GLSL curl noise and target attraction
     const simMaterial = new THREE.ShaderMaterial({
       vertexShader: simulationVertexShader,
       fragmentShader: simulationFragmentShader,
       uniforms: {
         uCurrentPosition: { value: null },
         uTargetPosition: { value: targetTexture },
-        uInitialPosition: { value: initialTexture },
         uTime: { value: 0 },
         uDeltaTime: { value: 0.016 },
-        uSpeed: { value: 1.0 },
         uNoiseStrength: { value: noiseStrength },
         uNoiseFrequency: { value: noiseFrequency },
         uReturnSpeed: { value: returnSpeed },
@@ -119,29 +181,21 @@ export default function GPGPUParticles({
         uMousePos: { value: new THREE.Vector3(999, 999, 999) },
         uMouseStrength: { value: mouseStrength },
         uChaos: { value: chaos },
-        uStandoutRatio: { value: 65536.0 / size } // Figure 0 consists of first 65,536 particles
+        uStandoutRatio: { value: STANDOUT_PARTICLE_COUNT / PARTICLE_COUNT },
       },
       depthWrite: false,
-      depthTest: false
+      depthTest: false,
     });
 
     const simPlane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), simMaterial);
     simScene.add(simPlane);
 
     return { simScene, simCamera, simMaterial, simPlane };
-  }, [targetTexture, initialTexture]);
+  }, [targetTexture]);
 
-  // Helper variables to maintain ping-pong state
-  const currentRT = useRef<THREE.WebGLRenderTarget>(fbo.rt0);
-  const nextRT = useRef<THREE.WebGLRenderTarget>(fbo.rt1);
-
-  // 4. Double render the initial coordinates into our Ping-Pong FBOs on mount
-  const initialized = useRef(false);
-  useEffect(() => {
-    const backupTarget = gl.getRenderTarget();
-
-    // Create a temporary layout mesh containing the raw coordinates data
-    const initMaterial = new THREE.ShaderMaterial({
+  const resetPass = useMemo(() => {
+    const resetScene = new THREE.Scene();
+    const resetMaterial = new THREE.ShaderMaterial({
       vertexShader: simulationVertexShader,
       fragmentShader: `
         uniform sampler2D uInitTexture;
@@ -151,50 +205,48 @@ export default function GPGPUParticles({
         }
       `,
       uniforms: {
-        uInitTexture: { value: initialTexture }
+        uInitTexture: { value: initialTexture },
       },
       depthWrite: false,
-      depthTest: false
+      depthTest: false,
     });
+    const resetMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), resetMaterial);
+    resetScene.add(resetMesh);
 
-    const initMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), initMaterial);
-    const tempScene = new THREE.Scene();
-    tempScene.add(initMesh);
+    return { resetScene, resetMaterial, resetMesh };
+  }, [initialTexture]);
 
-    // Initial render into rt0
+  const currentRT = useRef<THREE.WebGLRenderTarget>(fbo.rt0);
+  const nextRT = useRef<THREE.WebGLRenderTarget>(fbo.rt1);
+  const initialized = useRef(false);
+  const forceReset = useRef(false);
+
+  const pointerVector = useMemo(() => new THREE.Vector3(), []);
+  const mouseDirection = useMemo(() => new THREE.Vector3(), []);
+  const projectedMousePosition = useMemo(() => new THREE.Vector3(), []);
+
+  useEffect(() => {
+    const backupTarget = gl.getRenderTarget();
+
     gl.setRenderTarget(fbo.rt0);
-    gl.render(tempScene, sim.simCamera);
+    gl.render(resetPass.resetScene, sim.simCamera);
 
-    // Initial render into rt1
     gl.setRenderTarget(fbo.rt1);
-    gl.render(tempScene, sim.simCamera);
+    gl.render(resetPass.resetScene, sim.simCamera);
 
-    // Restore standard rendering destination
     gl.setRenderTarget(backupTarget);
-
-    // Cleanup resources
-    initMesh.geometry.dispose();
-    initMaterial.dispose();
-
     initialized.current = true;
-  }, [gl, fbo, sim, initialTexture]);
+  }, [fbo, gl, resetPass, sim]);
 
-  // 5. Create Points Rendering Buffer Geometry
   const pointsGeometry = useMemo(() => {
     const geom = new THREE.BufferGeometry();
+    const dummyPositions = new Float32Array(PARTICLE_COUNT * 3);
+    const references = new Float32Array(PARTICLE_COUNT * 2);
+    const randomSizes = new Float32Array(PARTICLE_COUNT);
 
-    const dummyPositions = new Float32Array(size * 3); // empty since shaders overwrite position
-    const references = new Float32Array(size * 2);
-    const randomSizes = new Float32Array(size);
-
-    for (let i = 0; i < size; i++) {
-      const u = (i % width) / width;
-      const v = Math.floor(i / width) / height;
-
-      references[i * 2 + 0] = u;
-      references[i * 2 + 1] = v;
-
-      // Random sizes between 0.4 and 1.6
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      references[i * 2] = (i % TEXTURE_WIDTH) / TEXTURE_WIDTH;
+      references[i * 2 + 1] = Math.floor(i / TEXTURE_WIDTH) / TEXTURE_HEIGHT;
       randomSizes[i] = 0.4 + Math.random() * 1.2;
     }
 
@@ -205,9 +257,8 @@ export default function GPGPUParticles({
     return geom;
   }, []);
 
-  // 6. Create Points Rendering Material
   const pointsMaterial = useMemo(() => {
-    const mat = new THREE.ShaderMaterial({
+    return new THREE.ShaderMaterial({
       vertexShader: renderVertexShader,
       fragmentShader: renderFragmentShader,
       uniforms: {
@@ -216,18 +267,15 @@ export default function GPGPUParticles({
         uPulseTime: { value: 0 },
         uAmberColor: { value: new THREE.Color(amberColor) },
         uGoldColor: { value: new THREE.Color(goldColor) },
-        uStandoutColor: { value: new THREE.Color(standoutColor) }
+        uStandoutColor: { value: new THREE.Color(standoutColor) },
       },
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       depthTest: true,
-      transparent: true
+      transparent: true,
     });
-
-    return mat;
   }, []);
 
-  // Sync props to uniforms immediately on prop adjustments
   useEffect(() => {
     sim.simMaterial.uniforms.uNoiseStrength.value = noiseStrength;
     sim.simMaterial.uniforms.uNoiseFrequency.value = noiseFrequency;
@@ -235,100 +283,63 @@ export default function GPGPUParticles({
     sim.simMaterial.uniforms.uChaos.value = chaos;
     sim.simMaterial.uniforms.uInteractionRadius.value = interactionRadius;
     sim.simMaterial.uniforms.uMouseStrength.value = mouseStrength;
-  }, [chaos, noiseStrength, noiseFrequency, returnSpeed, interactionRadius, mouseStrength]);
+  }, [chaos, interactionRadius, mouseStrength, noiseFrequency, noiseStrength, returnSpeed, sim]);
 
   useEffect(() => {
     pointsMaterial.uniforms.uBaseSize.value = baseSize;
     pointsMaterial.uniforms.uAmberColor.value.set(amberColor);
     pointsMaterial.uniforms.uGoldColor.value.set(goldColor);
     pointsMaterial.uniforms.uStandoutColor.value.set(standoutColor);
-  }, [baseSize, amberColor, goldColor, standoutColor]);
+  }, [amberColor, baseSize, goldColor, pointsMaterial, standoutColor]);
 
-  // Hook into re-triggering simulation resets (e.g. initial explosion blast)
-  const forceReset = useRef(false);
   useEffect(() => {
     if (resetSignal > 0) {
       forceReset.current = true;
     }
   }, [resetSignal]);
 
-  // Main Render Loop logic using Framerate-Independent clock delta
   useFrame((state, delta) => {
     if (!initialized.current) return;
 
     const time = state.clock.getElapsedTime();
-    // Clamp delta time to maximum of 0.05s to prevent massive coordinates teleportation when page lags
     const dt = Math.min(delta, 0.05);
-
-    // Track mouse projection onto focal depth plane
     const { pointer, camera } = state;
-    const tempV = new THREE.Vector3(pointer.x, pointer.y, 0.5);
-    tempV.unproject(camera);
-    const dir = tempV.sub(camera.position).normalize();
-    // Project mouse cursor onto depth coordinate z=-1.5 (center depth of crowd)
-    const targetZ = -1.5;
-    let distance = (targetZ - camera.position.z) / dir.z;
-    if (Math.abs(dir.z) < 0.001) distance = 4.0;
-    const projectedMousePos = camera.position.clone().add(dir.multiplyScalar(distance));
 
-    // A. Run GPGPU Simulation Step
+    pointerVector.set(pointer.x, pointer.y, 0.5).unproject(camera);
+    mouseDirection.copy(pointerVector).sub(camera.position).normalize();
+
+    const targetZ = -1.5;
+    let distance = (targetZ - camera.position.z) / mouseDirection.z;
+    if (Math.abs(mouseDirection.z) < 0.001) distance = 4.0;
+    projectedMousePosition.copy(camera.position).addScaledVector(mouseDirection, distance);
+
     const backupTarget = gl.getRenderTarget();
 
-    // Bind uniforms
     sim.simMaterial.uniforms.uTime.value = time;
     sim.simMaterial.uniforms.uDeltaTime.value = dt;
     sim.simMaterial.uniforms.uCurrentPosition.value = currentRT.current.texture;
-    sim.simMaterial.uniforms.uMousePos.value.copy(projectedMousePos);
+    sim.simMaterial.uniforms.uMousePos.value.copy(projectedMousePosition);
 
-    // If a manual reset is requested, override positions back to initial textures
     if (forceReset.current) {
-      const resetMaterial = new THREE.ShaderMaterial({
-        vertexShader: simulationVertexShader,
-        fragmentShader: `
-          uniform sampler2D uInitTexture;
-          varying vec2 vUv;
-          void main() {
-            gl_FragColor = texture2D(uInitTexture, vUv);
-          }
-        `,
-        uniforms: {
-          uInitTexture: { value: initialTexture }
-        },
-        depthWrite: false,
-        depthTest: false
-      });
-      const resetMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), resetMaterial);
-      const resetScene = new THREE.Scene();
-      resetScene.add(resetMesh);
-
       gl.setRenderTarget(currentRT.current);
-      gl.render(resetScene, sim.simCamera);
+      gl.render(resetPass.resetScene, sim.simCamera);
       gl.setRenderTarget(nextRT.current);
-      gl.render(resetScene, sim.simCamera);
-
-      resetMesh.geometry.dispose();
-      resetMaterial.dispose();
+      gl.render(resetPass.resetScene, sim.simCamera);
       forceReset.current = false;
     }
 
-    // Render texture updates on the GPGPU Render Target
     gl.setRenderTarget(nextRT.current);
     gl.render(sim.simScene, sim.simCamera);
-
-    // Restore standard rendering destination
     gl.setRenderTarget(backupTarget);
 
-    // Swap Render Targets to complete GPGPU Ping-Pong
     const temp = currentRT.current;
     currentRT.current = nextRT.current;
     nextRT.current = temp;
 
-    // B. Link current position texture to points render material
     pointsMaterial.uniforms.uPositionTexture.value = currentRT.current.texture;
     pointsMaterial.uniforms.uPulseTime.value = time;
   });
 
-  // Clean up WebGL resources when component unmounts to prevent GPU leaks
   useEffect(() => {
     return () => {
       fbo.rt0.dispose();
@@ -339,8 +350,25 @@ export default function GPGPUParticles({
       pointsMaterial.dispose();
       sim.simMaterial.dispose();
       sim.simPlane.geometry.dispose();
+      resetPass.resetMaterial.dispose();
+      resetPass.resetMesh.geometry.dispose();
     };
-  }, []);
+  }, [fbo, initialTexture, pointsGeometry, pointsMaterial, resetPass, sim, targetTexture]);
 
   return <points geometry={pointsGeometry} material={pointsMaterial} />;
+}
+
+export default function GPGPUParticles(props: GPGPUParticlesProps) {
+  const { gl } = useThree();
+  const textureType = useMemo(() => getSupportedGpgpuTextureType(gl), [gl]);
+
+  if (!textureType) {
+    return (
+      <GpuStatusMessage>
+        This GPU/browser does not support renderable floating-point textures required by the simulation.
+      </GpuStatusMessage>
+    );
+  }
+
+  return <CrowdTextureLoader {...props} textureType={textureType} />;
 }

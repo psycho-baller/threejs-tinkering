@@ -10,10 +10,8 @@ void main() {
 export const simulationFragmentShader = `
 uniform sampler2D uCurrentPosition;
 uniform sampler2D uTargetPosition;
-uniform sampler2D uInitialPosition;
 uniform float uTime;
 uniform float uDeltaTime;
-uniform float uSpeed;
 uniform float uNoiseStrength;
 uniform float uNoiseFrequency;
 uniform float uReturnSpeed;
@@ -140,10 +138,8 @@ void main() {
 
   // Generate an alternate Cosmic Vortex motion target
   float angle = atan(pos.z, pos.x);
-  float radius = length(pos.xz);
 
   // Dynamic vortex spiral calculations
-  float waveOffset = sin(pos.y * 1.5 - uTime * 0.4) * 0.5;
   // Vortex target radius depends slightly on particles to create thickness
   float vortexTargetRadius = 1.6 + 0.9 * sin(pos.y * 0.8 + uTime * 0.3) + fract(vUv.x * 23.4) * 0.7;
   // Add angular velocity
