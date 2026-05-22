@@ -137,21 +137,21 @@ function getPoseBones(poseType: number): Bone[] {
   bones.push({ id: "shoulders", start: lShoulder, end: rShoulder, radius: 0.08, weight: 0.04 });
   bones.push({ id: "pelvis", start: lThighS, end: rThighS, radius: 0.10, weight: 0.04 });
 
-  bones.push({ id: "l_upperarm", start: lShoulder, end: lElbow, radius: 0.045, weight: 0.06 });
-  bones.push({ id: "l_lowerarm", start: lElbow, end: lWrist, radius: 0.035, weight: 0.06 });
-  bones.push({ id: "r_upperarm", start: rShoulder, end: rElbow, radius: 0.045, weight: 0.06 });
-  bones.push({ id: "r_lowerarm", start: rElbow, end: rWrist, radius: 0.035, weight: 0.06 });
+  bones.push({ id: "l_upperarm", start: lShoulder, end: lElbow, radius: 0.05, weight: 0.06 });
+  bones.push({ id: "l_lowerarm", start: lElbow, end: lWrist, radius: 0.04, weight: 0.06 });
+  bones.push({ id: "r_upperarm", start: rShoulder, end: rElbow, radius: 0.05, weight: 0.06 });
+  bones.push({ id: "r_lowerarm", start: rElbow, end: rWrist, radius: 0.04, weight: 0.06 });
 
-  bones.push({ id: "l_thigh", start: lThighS, end: lThighE, radius: 0.065, weight: 0.06 });
-  bones.push({ id: "l_shin", start: lShinS, end: lShinE, radius: 0.05, weight: 0.06 });
-  bones.push({ id: "r_thigh", start: rThighS, end: rThighE, radius: 0.065, weight: 0.06 });
-  bones.push({ id: "r_shin", start: rShinS, end: rShinE, radius: 0.05, weight: 0.06 });
+  bones.push({ id: "l_thigh", start: lThighS, end: lThighE, radius: 0.075, weight: 0.06 });
+  bones.push({ id: "l_shin", start: lShinS, end: lShinE, radius: 0.055, weight: 0.06 });
+  bones.push({ id: "r_thigh", start: rThighS, end: rThighE, radius: 0.075, weight: 0.06 });
+  bones.push({ id: "r_shin", start: rShinS, end: rShinE, radius: 0.055, weight: 0.06 });
 
   return bones;
 }
 
-// Samples a single 3D point on or inside a capsule segment
-function sampleBonePoint(bone: Bone, out: { x: number; y: number; z: number }) {
+// Samples a single 3D point on or inside a capsule segment, incorporating body types and side depth fixes
+function sampleBonePoint(bone: Bone, bodyType: string, out: { x: number; y: number; z: number }) {
   const { start, end, radius } = bone;
 
   const dx = end.x - start.x;
@@ -160,18 +160,34 @@ function sampleBonePoint(bone: Bone, out: { x: number; y: number; z: number }) {
   const lengthSq = dx * dx + dy * dy + dz * dz;
 
   if (lengthSq < 0.0001) {
-    // It's a sphere (like the head) - shape it into a realistic head ellipsoid
+    // It's a sphere (like the head) - shape it into a realistic head ellipsoid based on body type
     const u1 = Math.random();
     const u2 = Math.random();
     const theta = u1 * Math.PI * 2.0;
     const phi = Math.acos(2.0 * u2 - 1.0);
-    // Uniform volumetric packing
     const r = radius * (0.8 + 0.2 * Math.pow(Math.random(), 0.3));
 
-    // Ellipsoid scaling: narrower left-to-right (0.92), taller vertically (1.25), deeper front-to-back (1.05)
-    out.x = start.x + r * Math.sin(phi) * Math.cos(theta) * 0.92;
-    out.y = start.y + r * Math.sin(phi) * Math.sin(theta) * 1.25;
-    out.z = start.z + r * Math.cos(phi) * 1.05;
+    let hx = 0.92;
+    let hy = 1.25;
+    let hz = 1.10; // Increased base depth to prevent flatness
+
+    if (bodyType === "volumetric") {
+      hx = 1.02;
+      hy = 1.18;
+      hz = 1.12;
+    } else if (bodyType === "athletic") {
+      hx = 0.95;
+      hy = 1.22;
+      hz = 1.12;
+    } else if (bodyType === "skinny") {
+      hx = 0.90;
+      hy = 1.26;
+      hz = 1.05;
+    }
+
+    out.x = start.x + r * Math.sin(phi) * Math.cos(theta) * hx;
+    out.y = start.y + r * Math.sin(phi) * Math.sin(theta) * hy;
+    out.z = start.z + r * Math.cos(phi) * hz;
     return;
   }
 
@@ -188,7 +204,6 @@ function sampleBonePoint(bone: Bone, out: { x: number; y: number; z: number }) {
 
   if (bone.id === "torso") {
     // Torso: t=0 is pelvis, t=1 is neck
-    // Tapers at the waist, expands at chest, narrows slightly at collar/neck base
     if (t < 0.2) {
       const localT = t / 0.2;
       shapeFactor = 1.15 * (1 - localT) + 0.95 * localT;
@@ -202,22 +217,19 @@ function sampleBonePoint(bone: Bone, out: { x: number; y: number; z: number }) {
       const localT = (t - 0.8) / 0.2;
       shapeFactor = 1.28 * (1 - localT) + 0.8 * localT;
     }
-    // Flatten torso to represent a ribcage/chest (wider side-to-side, flatter front-to-back)
-    scaleX = 1.35;
-    scaleZ = 0.85;
+    // Flatten torso to represent a ribcage (wider side-to-side, but keep depth at 1.12 to prevent side-profile flatness)
+    scaleX = 1.28;
+    scaleZ = 1.12;
   } else if (bone.id === "shoulders") {
-    // Shoulders horizontal bridge: flatter vertically/depth-wise
     scaleX = 1.0;
-    scaleZ = 0.9;
+    scaleZ = 1.12;
   } else if (bone.id === "pelvis") {
-    // Pelvis horizontal bridge
     scaleX = 1.0;
-    scaleZ = 0.9;
+    scaleZ = 1.12;
   } else if (bone.id === "l_thigh" || bone.id === "r_thigh") {
-    // Thighs: taper from hip (1.2) to knee (0.8)
     shapeFactor = 1.2 - 0.4 * t;
+    scaleZ = 1.05; // Slightly deeper thighs
   } else if (bone.id === "l_shin" || bone.id === "r_shin") {
-    // Shins: calf muscle flares out around t=0.3 and tapers to thin ankle at t=1.0
     if (t < 0.3) {
       const localT = t / 0.3;
       shapeFactor = 0.9 * (1 - localT) + 1.25 * localT;
@@ -228,14 +240,75 @@ function sampleBonePoint(bone: Bone, out: { x: number; y: number; z: number }) {
       const localT = (t - 0.7) / 0.3;
       shapeFactor = 0.8 * (1 - localT) + 0.58 * localT;
     }
+    scaleZ = 1.05; // Slightly deeper calves
   } else if (bone.id === "l_upperarm" || bone.id === "r_upperarm") {
-    // Upper arms: biceps bulge in the middle, slightly taper at elbow
     shapeFactor = 1.1 * (1 - t) + 0.85 * t + 0.15 * Math.sin(t * Math.PI);
   } else if (bone.id === "l_lowerarm" || bone.id === "r_lowerarm") {
-    // Lower arms: taper to wrist
     shapeFactor = 1.05 * (1 - t) + 0.65 * t;
   } else if (bone.id === "neck") {
     shapeFactor = 1.0 - 0.15 * t;
+  }
+
+  // Apply body type modifiers
+  if (bodyType === "volumetric") {
+    // Fat / heavy body type
+    if (bone.id === "torso") {
+      if (t < 0.2) {
+        shapeFactor += 0.18;
+      } else if (t < 0.45) {
+        shapeFactor += 0.30; // volumetric belly
+      } else if (t < 0.8) {
+        shapeFactor += 0.22; // wide belly/chest
+      } else {
+        shapeFactor += 0.12;
+      }
+      scaleX *= 1.35; // wider laterally to prevent circular expansion
+      scaleZ *= 1.10; // flatter depth representation
+    } else if (bone.id === "shoulders" || bone.id === "pelvis") {
+      shapeFactor *= 1.22;
+      scaleZ *= 1.12;
+    } else if (bone.id === "neck") {
+      shapeFactor *= 1.18;
+    } else {
+      // Limbs are thicker
+      shapeFactor *= 1.22;
+    }
+  } else if (bodyType === "athletic") {
+    // Strong / muscular body type (muscular chest, broad shoulders, narrow waist)
+    if (bone.id === "torso") {
+      if (t >= 0.45 && t < 0.8) {
+        shapeFactor *= 1.18; // strong chest
+      } else if (t < 0.45) {
+        shapeFactor *= 0.95; // trim waist
+      }
+      scaleX *= 1.25; // wider chest/shoulders
+      scaleZ *= 1.05;
+    } else if (bone.id === "shoulders") {
+      shapeFactor *= 1.25;
+      scaleZ *= 1.1;
+    } else if (bone.id === "l_upperarm" || bone.id === "r_upperarm") {
+      shapeFactor *= 1.25; // strong biceps
+    } else if (bone.id === "l_shin" || bone.id === "r_shin") {
+      if (t >= 0.2 && t < 0.6) {
+        shapeFactor *= 1.25; // strong calves
+      }
+    } else if (bone.id === "l_thigh" || bone.id === "r_thigh") {
+      shapeFactor *= 1.15; // strong thighs
+    }
+  } else if (bodyType === "skinny") {
+    // Slender / skinny body type - less extreme than before to avoid looking like sticks
+    if (bone.id === "torso") {
+      shapeFactor *= 0.90;
+      scaleX *= 0.95;
+      scaleZ *= 0.95;
+    } else if (bone.id === "shoulders" || bone.id === "pelvis") {
+      shapeFactor *= 0.92;
+      scaleZ *= 0.94;
+    } else if (bone.id === "neck") {
+      shapeFactor *= 0.90;
+    } else {
+      shapeFactor *= 0.85; // slender limbs (was 0.72)
+    }
   }
 
   // Make a unit vector perpendicular to the segment (dx, dy, dz)
@@ -306,47 +379,48 @@ interface FigureLayout {
   rotationY: number;
   scale: number;
   isStandout: boolean;
+  bodyType: "average" | "volumetric" | "athletic" | "skinny";
 }
 
 export const CROWD_LAYOUTS: FigureLayout[] = [
   // 0. The Standout Figure (Centered, larger, facing camera!)
-  { poseType: 0, offsetX: 0, offsetY: -1.0, offsetZ: 0.0, rotationY: 0.0, scale: 1.18, isStandout: true },
+  { poseType: 0, offsetX: 0, offsetY: -1.0, offsetZ: 0.0, rotationY: 0.0, scale: 1.18, isStandout: true, bodyType: "athletic" },
   
   // 1. Inner Circle Background Left
-  { poseType: 1, offsetX: -1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: 0.35, scale: 1.1, isStandout: false },
+  { poseType: 1, offsetX: -1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: 0.35, scale: 1.1, isStandout: false, bodyType: "volumetric" },
   // 2. Inner Circle Background Right
-  { poseType: 2, offsetX: 1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: -0.35, scale: 1.1, isStandout: false },
+  { poseType: 2, offsetX: 1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: -0.35, scale: 1.1, isStandout: false, bodyType: "skinny" },
   
   // 3. Middle Left Ground
-  { poseType: 3, offsetX: -3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: 0.55, scale: 1.08, isStandout: false },
+  { poseType: 3, offsetX: -3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: 0.55, scale: 1.08, isStandout: false, bodyType: "average" },
   // 4. Middle Right Ground
-  { poseType: 4, offsetX: 3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: -0.55, scale: 1.08, isStandout: false },
+  { poseType: 4, offsetX: 3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: -0.55, scale: 1.08, isStandout: false, bodyType: "athletic" },
   
   // 5. Deep Center Left
-  { poseType: 5, offsetX: -1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: 0.15, scale: 1.05, isStandout: false },
+  { poseType: 5, offsetX: -1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: 0.15, scale: 1.05, isStandout: false, bodyType: "volumetric" },
   // 6. Deep Center Right
-  { poseType: 6, offsetX: 1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: -0.15, scale: 1.05, isStandout: false },
+  { poseType: 6, offsetX: 1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: -0.15, scale: 1.05, isStandout: false, bodyType: "skinny" },
 
   // 7. Middle Far Left
-  { poseType: 7, offsetX: -5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: 0.70, scale: 1.0, isStandout: false },
+  { poseType: 7, offsetX: -5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: 0.70, scale: 1.0, isStandout: false, bodyType: "average" },
   // 8. Middle Far Right
-  { poseType: 0, offsetX: 5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: -0.70, scale: 1.0, isStandout: false },
+  { poseType: 0, offsetX: 5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: -0.70, scale: 1.0, isStandout: false, bodyType: "athletic" },
 
   // 9. Deep Far Left
-  { poseType: 1, offsetX: -2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: 0.30, scale: 0.98, isStandout: false },
+  { poseType: 1, offsetX: -2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: 0.30, scale: 0.98, isStandout: false, bodyType: "volumetric" },
   // 10. Deep Far Right
-  { poseType: 2, offsetX: 2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: -0.30, scale: 0.98, isStandout: false },
+  { poseType: 2, offsetX: 2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: -0.30, scale: 0.98, isStandout: false, bodyType: "skinny" },
 
   // 11. Core Back Projection
-  { poseType: 3, offsetX: 0.0, offsetY: -1.0, offsetZ: -5.5, rotationY: 0.0, scale: 0.95, isStandout: false },
+  { poseType: 3, offsetX: 0.0, offsetY: -1.0, offsetZ: -5.5, rotationY: 0.0, scale: 0.95, isStandout: false, bodyType: "average" },
   
   // 12. Distant Deep Left
-  { poseType: 4, offsetX: -4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: 0.50, scale: 0.95, isStandout: false },
+  { poseType: 4, offsetX: -4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: 0.50, scale: 0.95, isStandout: false, bodyType: "athletic" },
   // 13. Distant Deep Right
-  { poseType: 5, offsetX: 4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: -0.50, scale: 0.95, isStandout: false },
+  { poseType: 5, offsetX: 4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: -0.50, scale: 0.95, isStandout: false, bodyType: "volumetric" },
 
   // 14. Outer Wing Background Left
-  { poseType: 6, offsetX: -6.4, offsetY: -1.0, offsetZ: -4.5, rotationY: 0.85, scale: 0.9, isStandout: false },
+  { poseType: 6, offsetX: -6.4, offsetY: -1.0, offsetZ: -4.5, rotationY: 0.85, scale: 0.9, isStandout: false, bodyType: "skinny" },
 ];
 
 /**
@@ -403,8 +477,8 @@ export function generateCrowdTextures(width: number, height: number): {
         }
       }
 
-      // Sample raw point inside body structure
-      sampleBonePoint(chosenBone, tempPt);
+      // Sample raw point inside body structure, passing the specific figure's body type
+      sampleBonePoint(chosenBone, layout.bodyType, tempPt);
 
       // Apply scale, rotation around Y (yaw angles), and spatial position offset
       const angle = layout.rotationY;
