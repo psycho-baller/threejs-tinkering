@@ -15,6 +15,8 @@ interface SceneProps {
   goldColor: string;
   standoutColor: string;
   resetSignal: number;
+  soloStandout?: boolean;
+  debugView?: boolean;
 }
 
 export default function Scene({
@@ -28,12 +30,19 @@ export default function Scene({
   amberColor,
   goldColor,
   standoutColor,
-  resetSignal
+  resetSignal,
+  soloStandout = false,
+  debugView = false
 }: SceneProps) {
   return (
     <div id="canvas-container" className="w-full h-full relative" style={{ background: "#050508" }}>
       <Canvas
-        camera={{ position: [0, 1.2, 5.0], fov: 50, near: 0.1, far: 100 }}
+        camera={{
+          position: debugView ? [0, 0.38, 2.45] : [0, 1.2, 5.0],
+          fov: debugView ? 38 : 50,
+          near: 0.1,
+          far: 100,
+        }}
         gl={{
           antialias: true,
           powerPreference: "high-performance",
@@ -57,6 +66,7 @@ export default function Scene({
           goldColor={goldColor}
           standoutColor={standoutColor}
           resetSignal={resetSignal}
+          soloStandout={soloStandout}
         />
 
         {/* 2. Elegant cinematic camera limits for deep orbital views */}
@@ -68,7 +78,7 @@ export default function Scene({
           enablePan={false}
           maxPolarAngle={Math.PI / 2 + 0.15} // Let user look slightly upwards
           minPolarAngle={1.0}
-          target={[0, 0.4, -0.6]} // Target center of gravity of the crowd
+          target={debugView ? [0, 0.22, 0] : [0, 0.4, -0.6]} // Target center of gravity of the crowd
         />
 
         {/* 3. Epic Lusion bloom glow setup */}
@@ -77,9 +87,9 @@ export default function Scene({
             mipmapBlur
             luminanceThreshold={0.2} // Threshold to ensure background is slate-black
             luminanceSmoothing={0.9}
-            intensity={1.8} // Rich, ambient golden glowing light leakage
+            intensity={debugView ? 0.55 : 1.8} // Rich, ambient golden glowing light leakage
           />
-          <Noise opacity={0.02} />
+          <Noise opacity={debugView ? 0.006 : 0.02} />
         </EffectComposer>
       </Canvas>
     </div>

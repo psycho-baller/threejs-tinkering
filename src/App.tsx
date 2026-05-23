@@ -87,14 +87,16 @@ const PRESETS: SimulationPreset[] = [
 ];
 
 export default function App() {
+  const renderPeopleDebug = new URLSearchParams(window.location.search).has("renderpeopleDebug");
+
   // Preset state & customization parameters
   const [chaos, setChaos] = useState(0.0);
-  const [noiseStrength, setNoiseStrength] = useState(0.12);
+  const [noiseStrength, setNoiseStrength] = useState(renderPeopleDebug ? 0.0 : 0.12);
   const [noiseFrequency, setNoiseFrequency] = useState(0.35);
-  const [returnSpeed, setReturnSpeed] = useState(1.2);
-  const [baseSize, setBaseSize] = useState(0.056);
+  const [returnSpeed, setReturnSpeed] = useState(renderPeopleDebug ? 4.0 : 1.2);
+  const [baseSize, setBaseSize] = useState(renderPeopleDebug ? 0.032 : 0.056);
   const [interactionRadius, setInteractionRadius] = useState(1.8);
-  const [mouseStrength, setMouseStrength] = useState(4.5);
+  const [mouseStrength, setMouseStrength] = useState(renderPeopleDebug ? 0.0 : 4.5);
 
   const [selectedPreset, setSelectedPreset] = useState(0);
   const [selectedPalette, setSelectedPalette] = useState(0);
@@ -103,7 +105,7 @@ export default function App() {
   const [resetSignal, setResetSignal] = useState(0);
 
   // Layout states
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(!renderPeopleDebug);
   const [infoOpen, setInfoOpen] = useState(false);
 
   // Hook preset clicks
@@ -142,6 +144,8 @@ export default function App() {
           goldColor={currentPalette.gold}
           standoutColor={currentPalette.standout}
           resetSignal={resetSignal}
+          soloStandout={renderPeopleDebug}
+          debugView={renderPeopleDebug}
         />
       </div>
 

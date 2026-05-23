@@ -856,7 +856,11 @@ export const CROWD_LAYOUTS: FigureLayout[] = [
  * Target contains the beautiful Amber human crowds.
  * Initial contains a dispersed dark-gold starry vacuum so particles visually fly matching the "breath of life" to form the bodies.
  */
-export function generateCrowdTextures(width: number, height: number): {
+export function generateCrowdTextures(
+  width: number,
+  height: number,
+  options: { standoutPositions?: Float32Array | null } = {}
+): {
   targetPositions: Float32Array;
   initialPositions: Float32Array;
 } {
@@ -889,37 +893,50 @@ export function generateCrowdTextures(width: number, height: number): {
     const numRows = figIdx === 0 ? 128 : 64;
     const particleStart = startRow * width;
     const count = numRows * width;
+    const standoutPositions =
+      figIdx === 0 && options.standoutPositions?.length === count * 3
+        ? options.standoutPositions
+        : null;
 
     // Generate coordinates
     for (let i = 0; i < count; i++) {
       const idx = particleStart + i;
+      let worldX: number;
+      let worldY: number;
+      let worldZ: number;
 
-      // Select segment based on bone weight, using currentSum to support arbitrary total weight
-      const randValue = Math.random() * currentSum;
-      let chosenBone = bonesList[bonesList.length - 1];
-      for (let b = 0; b < bonesList.length; b++) {
-        if (randValue <= cumulativeWeights[b]) {
-          chosenBone = bonesList[b];
-          break;
+      if (standoutPositions) {
+        worldX = standoutPositions[i * 3 + 0];
+        worldY = standoutPositions[i * 3 + 1];
+        worldZ = standoutPositions[i * 3 + 2];
+      } else {
+        // Select segment based on bone weight, using currentSum to support arbitrary total weight
+        const randValue = Math.random() * currentSum;
+        let chosenBone = bonesList[bonesList.length - 1];
+        for (let b = 0; b < bonesList.length; b++) {
+          if (randValue <= cumulativeWeights[b]) {
+            chosenBone = bonesList[b];
+            break;
+          }
         }
+
+        // Sample raw point inside body structure, passing the specific figure's layout
+        sampleBonePoint(chosenBone, layout, tempPt);
+
+        // Apply scale, rotation around Y (yaw angles), and spatial position offset
+        const angle = layout.rotationY;
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+
+        // Local Rotations
+        const rx = tempPt.x * cosA - tempPt.z * sinA;
+        const rz = tempPt.x * sinA + tempPt.z * cosA;
+
+        // Apply height & placement shifts
+        worldX = rx * layout.scale + layout.offsetX;
+        worldY = tempPt.y * layout.scale + layout.offsetY;
+        worldZ = rz * layout.scale + layout.offsetZ;
       }
-
-      // Sample raw point inside body structure, passing the specific figure's layout
-      sampleBonePoint(chosenBone, layout, tempPt);
-
-      // Apply scale, rotation around Y (yaw angles), and spatial position offset
-      const angle = layout.rotationY;
-      const cosA = Math.cos(angle);
-      const sinA = Math.sin(angle);
-
-      // Local Rotations
-      const rx = tempPt.x * cosA - tempPt.z * sinA;
-      const rz = tempPt.x * sinA + tempPt.z * cosA;
-
-      // Apply height & placement shifts
-      const worldX = rx * layout.scale + layout.offsetX;
-      const worldY = tempPt.y * layout.scale + layout.offsetY;
-      const worldZ = rz * layout.scale + layout.offsetZ;
 
       // Pack into target Float32Array (RGBA texture channel configuration)
       // We pass the layout rotation or speed seed in Alpha

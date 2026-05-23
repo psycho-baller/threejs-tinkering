@@ -3,8 +3,10 @@ uniform sampler2D uPositionTexture;
 uniform float uBaseSize;
 attribute vec2 reference;
 attribute float aRandomSize;
+attribute vec3 aParticleColor;
 varying float vStandout;
 varying vec3 vWorldPosition;
+varying vec3 vParticleColor;
 
 void main() {
   // Read current position data from GPGPU FBO texture
@@ -14,6 +16,7 @@ void main() {
   // Expose standout state and position to fragment shader
   vStandout = positionData.w;
   vWorldPosition = particlePos;
+  vParticleColor = aParticleColor;
 
   // Standard MVP projection
   vec4 mvPosition = modelViewMatrix * vec4(particlePos, 1.0);
@@ -34,12 +37,19 @@ void main() {
 export const renderFragmentShader = `
 varying float vStandout;
 varying vec3 vWorldPosition;
+varying vec3 vParticleColor;
 uniform float uPulseTime;
 uniform vec3 uAmberColor;
 uniform vec3 uGoldColor;
 uniform vec3 uStandoutColor;
+uniform bool uSoloStandout;
+uniform bool uUseParticleColor;
 
 void main() {
+  if (uSoloStandout && vStandout < 0.5) {
+    discard;
+  }
+
   // Compute elegant radial soft gradient (dist from center of point coord)
   vec2 circCoord = gl_PointCoord - vec2(0.5);
   float dist = length(circCoord);
@@ -60,9 +70,17 @@ void main() {
   // Apply the "Standout Figure" highlight styling:
   // Multiply overall brightness. Raise to gold/white glowing colors.
   if (vStandout > 0.5) {
-    // Elegant bright sparks that pulse slightly
-    float pulse = 0.85 + 0.15 * sin(uPulseTime * 6.0 + colorNoise * 10.0);
-    particleColor = mix(uGoldColor, uStandoutColor, colorNoise * 0.6) * 2.2 * pulse;
+    if (uUseParticleColor) {
+      float pulse = uSoloStandout ? 1.0 : 0.92 + 0.08 * sin(uPulseTime * 6.0 + colorNoise * 10.0);
+      particleColor = (vParticleColor + vec3(0.035)) * (uSoloStandout ? 3.0 : 1.75) * pulse;
+      if (uSoloStandout) {
+        alpha = max(alpha, 0.72);
+      }
+    } else {
+      // Elegant bright sparks that pulse slightly
+      float pulse = 0.85 + 0.15 * sin(uPulseTime * 6.0 + colorNoise * 10.0);
+      particleColor = mix(uGoldColor, uStandoutColor, colorNoise * 0.6) * 2.2 * pulse;
+    }
     // Standout elements are tighter and clearer
     alpha *= 1.1;
   } else {

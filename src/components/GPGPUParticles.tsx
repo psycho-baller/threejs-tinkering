@@ -13,6 +13,7 @@ const STANDOUT_PARTICLE_COUNT = 65_536;
 interface PositionTextureData {
   targetPositions: Float32Array;
   initialPositions: Float32Array;
+  particleColors?: Float32Array;
 }
 
 interface GPGPUParticlesProps {
@@ -27,6 +28,7 @@ interface GPGPUParticlesProps {
   goldColor: string;
   standoutColor: string;
   resetSignal: number;
+  soloStandout?: boolean;
 }
 
 interface GPGPUParticleSimulationProps extends GPGPUParticlesProps {
@@ -132,6 +134,7 @@ function GPGPUParticleSimulation({
   goldColor,
   standoutColor,
   resetSignal,
+  soloStandout = false,
   textureData,
   textureType,
 }: GPGPUParticleSimulationProps) {
@@ -243,19 +246,29 @@ function GPGPUParticleSimulation({
     const dummyPositions = new Float32Array(PARTICLE_COUNT * 3);
     const references = new Float32Array(PARTICLE_COUNT * 2);
     const randomSizes = new Float32Array(PARTICLE_COUNT);
+    const particleColors = new Float32Array(PARTICLE_COUNT * 3);
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       references[i * 2] = (i % TEXTURE_WIDTH) / TEXTURE_WIDTH;
       references[i * 2 + 1] = Math.floor(i / TEXTURE_WIDTH) / TEXTURE_HEIGHT;
       randomSizes[i] = 0.4 + Math.random() * 1.2;
+
+      if (textureData.particleColors && i < STANDOUT_PARTICLE_COUNT) {
+        particleColors[i * 3] = textureData.particleColors[i * 3];
+        particleColors[i * 3 + 1] = textureData.particleColors[i * 3 + 1];
+        particleColors[i * 3 + 2] = textureData.particleColors[i * 3 + 2];
+      }
     }
 
     geom.setAttribute("position", new THREE.BufferAttribute(dummyPositions, 3));
     geom.setAttribute("reference", new THREE.BufferAttribute(references, 2));
     geom.setAttribute("aRandomSize", new THREE.BufferAttribute(randomSizes, 1));
+    geom.setAttribute("aParticleColor", new THREE.BufferAttribute(particleColors, 3));
 
     return geom;
-  }, []);
+  }, [textureData.particleColors]);
+
+  const useParticleColor = Boolean(textureData.particleColors);
 
   const pointsMaterial = useMemo(() => {
     return new THREE.ShaderMaterial({
@@ -268,13 +281,15 @@ function GPGPUParticleSimulation({
         uAmberColor: { value: new THREE.Color(amberColor) },
         uGoldColor: { value: new THREE.Color(goldColor) },
         uStandoutColor: { value: new THREE.Color(standoutColor) },
+        uSoloStandout: { value: soloStandout },
+        uUseParticleColor: { value: useParticleColor },
       },
-      blending: THREE.AdditiveBlending,
+      blending: soloStandout ? THREE.NormalBlending : THREE.AdditiveBlending,
       depthWrite: false,
       depthTest: true,
       transparent: true,
     });
-  }, []);
+  }, [soloStandout, useParticleColor]);
 
   useEffect(() => {
     sim.simMaterial.uniforms.uNoiseStrength.value = noiseStrength;
@@ -290,7 +305,9 @@ function GPGPUParticleSimulation({
     pointsMaterial.uniforms.uAmberColor.value.set(amberColor);
     pointsMaterial.uniforms.uGoldColor.value.set(goldColor);
     pointsMaterial.uniforms.uStandoutColor.value.set(standoutColor);
-  }, [amberColor, baseSize, goldColor, pointsMaterial, standoutColor]);
+    pointsMaterial.uniforms.uSoloStandout.value = soloStandout;
+    pointsMaterial.uniforms.uUseParticleColor.value = useParticleColor;
+  }, [amberColor, baseSize, goldColor, pointsMaterial, soloStandout, standoutColor, useParticleColor]);
 
   useEffect(() => {
     if (resetSignal > 0) {
