@@ -2,24 +2,34 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
+const ASSET_ID = "rp_posedplus_00068_18";
+const RENDERPEOPLE_ROOT = "/Users/rami/Downloads/rp_posedplus_00068_18/extracted";
+const VARIANT = process.env.RENDERPEOPLE_VARIANT ?? "100k";
+const TEXTURE_RESOLUTION = VARIANT === "300k" ? "8k" : "4k";
 const DEFAULT_SOURCE =
-  "/Users/rami/Downloads/rp_posedplus_00068_18/extracted/rp_posedplus_00068_18_100k/rp_posedplus_00068_18_100k.glb";
+  `${RENDERPEOPLE_ROOT}/${ASSET_ID}_${VARIANT}/${ASSET_ID}_${VARIANT}.glb`;
 const DEFAULT_OUTPUT =
-  "public/private-assets/renderpeople/rp_posedplus_00068_18_100k_standout.bin";
+  `public/private-assets/renderpeople/${ASSET_ID}_${VARIANT}_standout.bin`;
 const DEFAULT_BASECOLOR =
-  "/Users/rami/Downloads/rp_posedplus_00068_18/extracted/rp_posedplus_00068_18_100k/tex/rp_posedplus_00068_18_4k_basecolor.jpg";
+  `${RENDERPEOPLE_ROOT}/${ASSET_ID}_${VARIANT}/tex/${ASSET_ID}_${TEXTURE_RESOLUTION}_basecolor.jpg`;
 
-const PARTICLE_COUNT = 65_536;
+const PARTICLE_COUNT = Number(process.env.RENDERPEOPLE_PARTICLE_COUNT ?? 65_536);
 const TARGET_HEIGHT = Number(process.env.RENDERPEOPLE_TARGET_HEIGHT ?? 2.05);
 const FOOT_Y = Number(process.env.RENDERPEOPLE_FOOT_Y ?? -1.12);
 const CENTER_Z = Number(process.env.RENDERPEOPLE_CENTER_Z ?? 0.0);
 const YAW_RADIANS = (Number(process.env.RENDERPEOPLE_YAW_DEGREES ?? 180) * Math.PI) / 180;
-const SOURCE_PATH = process.env.RENDERPEOPLE_GLB ?? DEFAULT_SOURCE;
+const SOURCE_PATH = process.env.RENDERPEOPLE_GLB ?? process.env.RENDERPEOPLE_SOURCE ?? DEFAULT_SOURCE;
 const OUTPUT_PATH = process.env.RENDERPEOPLE_OUTPUT ?? DEFAULT_OUTPUT;
 const BASECOLOR_PATH = process.env.RENDERPEOPLE_BASECOLOR ?? DEFAULT_BASECOLOR;
 const COLOR_OUTPUT_PATH =
   process.env.RENDERPEOPLE_COLOR_OUTPUT ?? OUTPUT_PATH.replace(/\.bin$/, "_color.bin");
 const FLIP_TEXTURE_V = process.env.RENDERPEOPLE_FLIP_V === "1";
+const HEIGHT_BANDS = [
+  { name: "feetAndLowerLegs", min: 0.0, max: 0.34, share: 0.30, importance: 1.25 },
+  { name: "upperLegsAndHips", min: 0.34, max: 0.54, share: 0.28, importance: 1.05 },
+  { name: "torsoAndArms", min: 0.54, max: 0.76, share: 0.30, importance: 0.85 },
+  { name: "headAndShoulders", min: 0.76, max: 1.01, share: 0.12, importance: 0.55 },
+];
 
 const COMPONENT_BYTE_SIZE = new Map([
   [5120, 1],
@@ -255,21 +265,16 @@ function sampleRgb(texture, uv) {
   ];
 }
 
-function heightImportance(height01, normal) {
-  let weight = 0.2;
+function findHeightBand(height01) {
+  return HEIGHT_BANDS.findIndex((band) => height01 >= band.min && height01 < band.max);
+}
 
-  if (height01 > 0.82) {
-    weight = 14.0;
-  } else if (height01 > 0.72) {
-    weight = 6.5;
-  } else if (height01 > 0.5) {
-    weight = 1.8;
-  } else if (height01 > 0.34) {
-    weight = 0.85;
-  }
+function bandImportance(bandIndex, normal) {
+  const band = HEIGHT_BANDS[bandIndex];
+  let weight = band.importance;
 
-  if (height01 > 0.72) {
-    weight *= 1.0 + Math.max(0, normal[2]) * 2.0;
+  if (band.name === "headAndShoulders") {
+    weight *= 1.0 + Math.max(0, normal[2]) * 0.35;
   }
 
   return weight;
@@ -288,6 +293,22 @@ function lowerBound(values, target) {
   return low;
 }
 
+function chooseBand(bandTargets, bandCounts, particleIndex) {
+  let selectedIndex = 0;
+  let largestDeficit = -Infinity;
+
+  for (let i = 0; i < bandTargets.length; i++) {
+    const expected = bandTargets[i] * (particleIndex + 1);
+    const deficit = expected - bandCounts[i];
+    if (deficit > largestDeficit) {
+      selectedIndex = i;
+      largestDeficit = deficit;
+    }
+  }
+
+  return selectedIndex;
+}
+
 function main() {
   const glb = parseGlb(SOURCE_PATH);
   const meshNode = glb.json.nodes.find((node) => node.mesh !== undefined);
@@ -298,9 +319,10 @@ function main() {
   const mesh = glb.json.meshes[meshNode.mesh];
   const primitive = mesh.primitives[0];
   const positions = getAccessorReader(glb, primitive.attributes.POSITION);
-  const uvs = getAccessorReader(glb, primitive.attributes.TEXCOORD_0);
   const indices = getAccessorReader(glb, primitive.indices);
-  const texture = decodeRgbImage(BASECOLOR_PATH);
+  const hasBaseColor = fs.existsSync(BASECOLOR_PATH) && primitive.attributes.TEXCOORD_0 !== undefined;
+  const uvs = hasBaseColor ? getAccessorReader(glb, primitive.attributes.TEXCOORD_0) : null;
+  const texture = hasBaseColor ? decodeRgbImage(BASECOLOR_PATH) : null;
 
   const sourcePositions = new Array(positions.count);
   const sourceBounds = {
@@ -335,9 +357,12 @@ function main() {
   }
 
   const sourceHeight = sourceBounds.max[1] - sourceBounds.min[1];
-  const cumulativeWeights = [];
-  const triangles = [];
-  let totalWeight = 0;
+  const bandSamplers = HEIGHT_BANDS.map((band) => ({
+    ...band,
+    cumulativeWeights: [],
+    triangles: [],
+    totalWeight: 0,
+  }));
 
   for (let i = 0; i < indices.count; i += 3) {
     const ia = indices.read(i);
@@ -360,26 +385,38 @@ function main() {
     const sourceCentroidY =
       (sourcePositions[ia][1] + sourcePositions[ib][1] + sourcePositions[ic][1]) / 3;
     const height01 = (sourceCentroidY - sourceBounds.min[1]) / sourceHeight;
-    const weight = doubleArea * heightImportance(height01, unitNormal);
+    const bandIndex = findHeightBand(height01);
 
-    totalWeight += weight;
-    cumulativeWeights.push(totalWeight);
-    triangles.push({
+    if (bandIndex < 0) continue;
+
+    const sampler = bandSamplers[bandIndex];
+    const weight = doubleArea * bandImportance(bandIndex, unitNormal);
+
+    sampler.totalWeight += weight;
+    sampler.cumulativeWeights.push(sampler.totalWeight);
+    sampler.triangles.push({
       a,
       b,
       c,
-      uvA: [uvs.read(ia, 0), uvs.read(ia, 1)],
-      uvB: [uvs.read(ib, 0), uvs.read(ib, 1)],
-      uvC: [uvs.read(ic, 0), uvs.read(ic, 1)],
+      uvA: uvs ? [uvs.read(ia, 0), uvs.read(ia, 1)] : null,
+      uvB: uvs ? [uvs.read(ib, 0), uvs.read(ib, 1)] : null,
+      uvC: uvs ? [uvs.read(ic, 0), uvs.read(ic, 1)] : null,
     });
   }
 
   const random = mulberry32(Number(process.env.RENDERPEOPLE_SEED ?? 68018));
   const output = new Float32Array(PARTICLE_COUNT * 3);
-  const colorOutput = new Float32Array(PARTICLE_COUNT * 3);
+  const colorOutput = texture ? new Float32Array(PARTICLE_COUNT * 3) : null;
+  const bandTargets = HEIGHT_BANDS.map((band) => band.share);
+  const bandCounts = HEIGHT_BANDS.map(() => 0);
 
   for (let i = 0; i < PARTICLE_COUNT; i++) {
-    const triangle = triangles[lowerBound(cumulativeWeights, random() * totalWeight)];
+    const bandIndex = chooseBand(bandTargets, bandCounts, i);
+    const sampler = bandSamplers[bandIndex];
+    const triangle =
+      sampler.triangles[lowerBound(sampler.cumulativeWeights, random() * sampler.totalWeight)];
+    bandCounts[bandIndex]++;
+
     const r1 = Math.sqrt(random());
     const r2 = random();
     const wa = 1 - r1;
@@ -390,19 +427,23 @@ function main() {
     output[i * 3 + 1] = triangle.a[1] * wa + triangle.b[1] * wb + triangle.c[1] * wc;
     output[i * 3 + 2] = triangle.a[2] * wa + triangle.b[2] * wb + triangle.c[2] * wc;
 
-    const uv = [
-      triangle.uvA[0] * wa + triangle.uvB[0] * wb + triangle.uvC[0] * wc,
-      triangle.uvA[1] * wa + triangle.uvB[1] * wb + triangle.uvC[1] * wc,
-    ];
-    const color = sampleRgb(texture, uv);
-    colorOutput[i * 3] = color[0];
-    colorOutput[i * 3 + 1] = color[1];
-    colorOutput[i * 3 + 2] = color[2];
+    if (texture && colorOutput) {
+      const uv = [
+        triangle.uvA[0] * wa + triangle.uvB[0] * wb + triangle.uvC[0] * wc,
+        triangle.uvA[1] * wa + triangle.uvB[1] * wb + triangle.uvC[1] * wc,
+      ];
+      const color = sampleRgb(texture, uv);
+      colorOutput[i * 3] = color[0];
+      colorOutput[i * 3 + 1] = color[1];
+      colorOutput[i * 3 + 2] = color[2];
+    }
   }
 
   fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
   fs.writeFileSync(OUTPUT_PATH, Buffer.from(output.buffer));
-  fs.writeFileSync(COLOR_OUTPUT_PATH, Buffer.from(colorOutput.buffer));
+  if (colorOutput) {
+    fs.writeFileSync(COLOR_OUTPUT_PATH, Buffer.from(colorOutput.buffer));
+  }
 
   const metadataPath = OUTPUT_PATH.replace(/\.bin$/, ".metadata.json");
   fs.writeFileSync(
@@ -411,8 +452,8 @@ function main() {
       {
         source: SOURCE_PATH,
         output: OUTPUT_PATH,
-        colorOutput: COLOR_OUTPUT_PATH,
-        basecolor: BASECOLOR_PATH,
+        colorOutput: colorOutput ? COLOR_OUTPUT_PATH : null,
+        basecolor: texture ? BASECOLOR_PATH : null,
         particles: PARTICLE_COUNT,
         vertices: positions.count,
         triangles: indices.count / 3,
@@ -422,6 +463,11 @@ function main() {
         yawDegrees: Number(process.env.RENDERPEOPLE_YAW_DEGREES ?? 180),
         flipTextureV: FLIP_TEXTURE_V,
         sceneBounds,
+        heightBands: HEIGHT_BANDS.map((band, index) => ({
+          ...band,
+          particles: bandCounts[index],
+          triangleCandidates: bandSamplers[index].triangles.length,
+        })),
       },
       null,
       2
@@ -429,7 +475,11 @@ function main() {
   );
 
   console.log(`Wrote ${PARTICLE_COUNT.toLocaleString()} standout particles to ${OUTPUT_PATH}`);
-  console.log(`Wrote ${PARTICLE_COUNT.toLocaleString()} standout colors to ${COLOR_OUTPUT_PATH}`);
+  if (colorOutput) {
+    console.log(`Wrote ${PARTICLE_COUNT.toLocaleString()} standout colors to ${COLOR_OUTPUT_PATH}`);
+  } else {
+    console.log("Skipped color output because no external basecolor texture was available.");
+  }
   console.log(`Wrote metadata to ${metadataPath}`);
   console.log(
     `Scene bounds min=${sceneBounds.min.map((value) => value.toFixed(3)).join(", ")} max=${sceneBounds.max

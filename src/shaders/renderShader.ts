@@ -72,9 +72,12 @@ void main() {
   if (vStandout > 0.5) {
     if (uUseParticleColor) {
       float pulse = uSoloStandout ? 1.0 : 0.92 + 0.08 * sin(uPulseTime * 6.0 + colorNoise * 10.0);
-      particleColor = (vParticleColor + vec3(0.035)) * (uSoloStandout ? 3.0 : 1.75) * pulse;
+      float albedoLuma = dot(vParticleColor, vec3(0.2126, 0.7152, 0.0722));
+      vec3 compressedColor = mix(vParticleColor, vec3(albedoLuma), 0.22);
+      compressedColor *= mix(1.0, 0.54, smoothstep(0.48, 0.88, albedoLuma));
+      particleColor = (compressedColor + vec3(0.014)) * (uSoloStandout ? 1.15 : 1.25) * pulse;
       if (uSoloStandout) {
-        alpha = max(alpha, 0.72);
+        alpha = max(alpha, 0.28);
       }
     } else {
       // Elegant bright sparks that pulse slightly
@@ -82,7 +85,7 @@ void main() {
       particleColor = mix(uGoldColor, uStandoutColor, colorNoise * 0.6) * 2.2 * pulse;
     }
     // Standout elements are tighter and clearer
-    alpha *= 1.1;
+    alpha *= uSoloStandout ? 0.9 : 1.05;
   } else {
     // Ambient crowd lights fade slightly into depth
     alpha *= 0.6;

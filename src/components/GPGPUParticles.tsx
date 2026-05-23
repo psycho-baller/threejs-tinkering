@@ -9,6 +9,7 @@ const TEXTURE_WIDTH = 512;
 const TEXTURE_HEIGHT = 1024;
 const PARTICLE_COUNT = TEXTURE_WIDTH * TEXTURE_HEIGHT;
 const STANDOUT_PARTICLE_COUNT = 65_536;
+const MAX_BASE_PARTICLE_SIZE = 0.05;
 
 interface PositionTextureData {
   targetPositions: Float32Array;
@@ -29,6 +30,7 @@ interface GPGPUParticlesProps {
   standoutColor: string;
   resetSignal: number;
   soloStandout?: boolean;
+  renderPeopleMesh?: string;
 }
 
 interface GPGPUParticleSimulationProps extends GPGPUParticlesProps {
@@ -83,9 +85,12 @@ function GpuStatusMessage({ children }: { children: string }) {
 function CrowdTextureLoader(props: GPGPUParticlesProps & { textureType: THREE.TextureDataType }) {
   const [textureData, setTextureData] = useState<PositionTextureData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const renderPeopleMesh = props.renderPeopleMesh ?? "100k";
 
   useEffect(() => {
     let cancelled = false;
+    setTextureData(null);
+    setLoadError(null);
     const worker = new Worker(new URL("../workers/crowdTextureWorker.ts", import.meta.url), {
       type: "module",
     });
@@ -103,13 +108,13 @@ function CrowdTextureLoader(props: GPGPUParticlesProps & { textureType: THREE.Te
       worker.terminate();
     };
 
-    worker.postMessage({ width: TEXTURE_WIDTH, height: TEXTURE_HEIGHT });
+    worker.postMessage({ width: TEXTURE_WIDTH, height: TEXTURE_HEIGHT, renderPeopleMesh });
 
     return () => {
       cancelled = true;
       worker.terminate();
     };
-  }, []);
+  }, [renderPeopleMesh]);
 
   if (loadError) {
     return <GpuStatusMessage>{loadError}</GpuStatusMessage>;
@@ -139,6 +144,7 @@ function GPGPUParticleSimulation({
   textureType,
 }: GPGPUParticleSimulationProps) {
   const { gl } = useThree();
+  const clampedBaseSize = Math.min(baseSize, MAX_BASE_PARTICLE_SIZE);
 
   const { targetTexture, initialTexture } = useMemo(() => {
     return {
@@ -276,7 +282,7 @@ function GPGPUParticleSimulation({
       fragmentShader: renderFragmentShader,
       uniforms: {
         uPositionTexture: { value: null },
-        uBaseSize: { value: baseSize },
+        uBaseSize: { value: clampedBaseSize },
         uPulseTime: { value: 0 },
         uAmberColor: { value: new THREE.Color(amberColor) },
         uGoldColor: { value: new THREE.Color(goldColor) },
@@ -289,7 +295,7 @@ function GPGPUParticleSimulation({
       depthTest: true,
       transparent: true,
     });
-  }, [soloStandout, useParticleColor]);
+  }, [clampedBaseSize, soloStandout, useParticleColor]);
 
   useEffect(() => {
     sim.simMaterial.uniforms.uNoiseStrength.value = noiseStrength;
@@ -301,13 +307,13 @@ function GPGPUParticleSimulation({
   }, [chaos, interactionRadius, mouseStrength, noiseFrequency, noiseStrength, returnSpeed, sim]);
 
   useEffect(() => {
-    pointsMaterial.uniforms.uBaseSize.value = baseSize;
+    pointsMaterial.uniforms.uBaseSize.value = clampedBaseSize;
     pointsMaterial.uniforms.uAmberColor.value.set(amberColor);
     pointsMaterial.uniforms.uGoldColor.value.set(goldColor);
     pointsMaterial.uniforms.uStandoutColor.value.set(standoutColor);
     pointsMaterial.uniforms.uSoloStandout.value = soloStandout;
     pointsMaterial.uniforms.uUseParticleColor.value = useParticleColor;
-  }, [amberColor, baseSize, goldColor, pointsMaterial, soloStandout, standoutColor, useParticleColor]);
+  }, [amberColor, clampedBaseSize, goldColor, pointsMaterial, soloStandout, standoutColor, useParticleColor]);
 
   useEffect(() => {
     if (resetSignal > 0) {

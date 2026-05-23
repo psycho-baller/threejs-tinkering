@@ -51,19 +51,19 @@ const PRESETS: SimulationPreset[] = [
   {
     name: "Structured Assembly",
     chaos: 0.0,
-    noiseStrength: 0.12,
-    noiseFrequency: 0.35,
-    returnSpeed: 1.2,
-    baseSize: 0.056,
-    description: "Particles are tightly drawn to their human skeletal targets with slight organic breathing."
+    noiseStrength: 0.03,
+    noiseFrequency: 0.25,
+    returnSpeed: 2.4,
+    baseSize: 0.032,
+    description: "Particles stay tightly aligned to the human targets with minimal settling motion."
   },
   {
     name: "Lively Fluidity",
     chaos: 0.15,
-    noiseStrength: 0.45,
+    noiseStrength: 0.28,
     noiseFrequency: 0.5,
     returnSpeed: 0.9,
-    baseSize: 0.060,
+    baseSize: 0.042,
     description: "Particles drift in soft fluid currents, forming loose and alive golden structures."
   },
   {
@@ -76,27 +76,32 @@ const PRESETS: SimulationPreset[] = [
     description: "The entire crowd completely dissolves and swirls upwards into a glowing double-helix vortex."
   },
   {
-    name: "Nebulous Dissolution",
-    chaos: 0.45,
-    noiseStrength: 1.6,
-    noiseFrequency: 1.1,
-    returnSpeed: 0.6,
-    baseSize: 0.052,
-    description: "The structures melt and evaporate into an active space storm of shimmering gold."
+    name: "Fine Human Lock",
+    chaos: 0.0,
+    noiseStrength: 0.0,
+    noiseFrequency: 0.2,
+    returnSpeed: 4.0,
+    baseSize: 0.032,
+    description: "Conservative tuning that keeps particles locked to the human forms for clean inspection."
   }
 ];
 
 export default function App() {
-  const renderPeopleDebug = new URLSearchParams(window.location.search).has("renderpeopleDebug");
+  const queryParams = new URLSearchParams(window.location.search);
+  const renderPeopleDebug = queryParams.has("renderpeopleDebug");
+  const renderPeopleCrowdDebug = queryParams.has("renderpeopleCrowdDebug");
+  const renderPeopleInspection = renderPeopleDebug || renderPeopleCrowdDebug;
+  const hideHud = renderPeopleInspection || queryParams.has("hideHud");
+  const renderPeopleMesh = queryParams.get("renderpeopleMesh") === "300k" ? "300k" : "100k";
 
   // Preset state & customization parameters
   const [chaos, setChaos] = useState(0.0);
-  const [noiseStrength, setNoiseStrength] = useState(renderPeopleDebug ? 0.0 : 0.12);
-  const [noiseFrequency, setNoiseFrequency] = useState(0.35);
-  const [returnSpeed, setReturnSpeed] = useState(renderPeopleDebug ? 4.0 : 1.2);
-  const [baseSize, setBaseSize] = useState(renderPeopleDebug ? 0.032 : 0.056);
+  const [noiseStrength, setNoiseStrength] = useState(renderPeopleInspection ? 0.0 : 0.03);
+  const [noiseFrequency, setNoiseFrequency] = useState(0.25);
+  const [returnSpeed, setReturnSpeed] = useState(renderPeopleInspection ? 4.0 : 2.4);
+  const [baseSize, setBaseSize] = useState(renderPeopleInspection ? 0.016 : 0.032);
   const [interactionRadius, setInteractionRadius] = useState(1.8);
-  const [mouseStrength, setMouseStrength] = useState(renderPeopleDebug ? 0.0 : 4.5);
+  const [mouseStrength, setMouseStrength] = useState(renderPeopleInspection ? 0.0 : 4.5);
 
   const [selectedPreset, setSelectedPreset] = useState(0);
   const [selectedPalette, setSelectedPalette] = useState(0);
@@ -105,7 +110,7 @@ export default function App() {
   const [resetSignal, setResetSignal] = useState(0);
 
   // Layout states
-  const [sidebarOpen, setSidebarOpen] = useState(!renderPeopleDebug);
+  const [sidebarOpen, setSidebarOpen] = useState(!renderPeopleInspection);
   const [infoOpen, setInfoOpen] = useState(false);
 
   // Hook preset clicks
@@ -145,12 +150,18 @@ export default function App() {
           standoutColor={currentPalette.standout}
           resetSignal={resetSignal}
           soloStandout={renderPeopleDebug}
-          debugView={renderPeopleDebug}
+          debugView={renderPeopleInspection}
+          renderPeopleMesh={renderPeopleMesh}
         />
       </div>
 
       {/* Interactive Floating Interface Layout */}
-      <div id="hud-ui-layer" className="absolute inset-0 w-full h-full pointer-events-none z-10 flex flex-col justify-between p-4 md:p-6">
+      <div
+        id="hud-ui-layer"
+        className={`absolute inset-0 w-full h-full pointer-events-none z-10 flex flex-col justify-between p-4 md:p-6 ${
+          hideHud ? "hidden" : ""
+        }`}
+      >
         
         {/* Top Header Row */}
         <header id="hud-header" className="w-full flex items-center justify-between pointer-events-auto">
@@ -337,10 +348,10 @@ export default function App() {
                     id="particle-size-slider"
                     type="range"
                     min="0.01"
-                    max="0.06"
+                    max="0.05"
                     step="0.001"
                     value={baseSize}
-                    onChange={(e) => setBaseSize(parseFloat(e.target.value))}
+                    onChange={(e) => setBaseSize(Math.min(parseFloat(e.target.value), 0.05))}
                     className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
                   />
                 </div>

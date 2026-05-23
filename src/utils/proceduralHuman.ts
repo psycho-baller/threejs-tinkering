@@ -11,7 +11,7 @@ export interface FigureLayout {
   bodyType: "average" | "volumetric" | "athletic" | "skinny";
   gender: "male" | "female";
   hairStyle: "short" | "long" | "bald";
-  expression: "happy" | "sad" | "content" | "excited";
+  expression: "happy" | "sad" | "content" | "excited" | "none" | "faceless";
 }
 
 // Helper to define joint coordinates in 3D
@@ -210,6 +210,7 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
   if (bone.id === "head") {
     // Generate head and facial features!
     const rPart = Math.random();
+    const isFaceless = layout.expression === "faceless";
     
     // We shape the head dimensions based on body type
     let hx = 0.95;
@@ -230,7 +231,7 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
       hz = 1.22;
     }
 
-    if (rPart < 0.05) {
+    if (rPart < 0.05 && !isFaceless) {
       // 1. EYES & EYEBROWS (5% of head particles)
       const isLeft = rPart < 0.025;
       const eyeSide = isLeft ? -1.0 : 1.0;
@@ -256,6 +257,9 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
         } else if (layout.expression === "sad") {
           // Slanted: inner corner (tBrow = -1) is raised, outer corner (tBrow = 1) is lowered
           browAngleY = 0.22 - tBrow * 0.035;
+        } else if (layout.expression === "none") {
+          // Completely flat/neutral eyebrow height angle
+          browAngleY = 0.20;
         } else { // content
           // Relaxed
           browAngleY = 0.20 + (1.0 - tBrow * tBrow) * 0.01;
@@ -295,6 +299,10 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
           // Tilt outer edges down
           const localX = Math.cos(u) * rEye;
           tilt = -0.2 * localX * eyeSide;
+        } else if (layout.expression === "none") {
+          // Standard neutral eye shapes
+          yScale = 0.6;
+          rEye = 0.011 * Math.sqrt(Math.random());
         }
         
         out.x = start.x + ex + Math.cos(u) * rEye;
@@ -303,7 +311,7 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
         return;
       }
       
-    } else if (rPart < 0.09) {
+    } else if (rPart < 0.09 && !isFaceless) {
       // 2. NOSE (4% of head particles)
       const tNose = Math.random(); // 0 (bridge) to 1 (tip)
       const noseY = 0.05 - tNose * 0.08; // starts at bridge height, down to tip height
@@ -317,7 +325,7 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
       out.z = start.z + zSurface + protrusion;
       return;
       
-    } else if (rPart < 0.13) {
+    } else if (rPart < 0.13 && !isFaceless) {
       // 3. MOUTH (4% of head particles)
       const isExcited = layout.expression === "excited";
       const mouthWidth = isExcited ? 0.042 : 0.035;
@@ -350,6 +358,10 @@ function sampleBonePoint(bone: Bone, layout: FigureLayout, out: { x: number; y: 
         // Push interior particles slightly back to create a 3D oral cavity depth!
         const centerFactor = 1.0 - Math.abs(tMouth); // 1.0 at center, 0.0 at corners
         zOffset = -centerFactor * Math.random() * 0.008;
+        verticalSpread = (Math.random() - 0.5) * 0.001;
+      } else if (layout.expression === "none") {
+        // Perfectly flat mouth line with no curve or smile
+        my = mouthY;
         verticalSpread = (Math.random() - 0.5) * 0.001;
       } else { // content
         // Gentle smile curve
@@ -814,12 +826,12 @@ export const CROWD_LAYOUTS: FigureLayout[] = [
   { poseType: 0, offsetX: 0, offsetY: -1.0, offsetZ: 0.0, rotationY: 0.0, scale: 1.18, isStandout: true, bodyType: "athletic", gender: "male", hairStyle: "short", expression: "excited" },
   
   // 1. Inner Circle Background Left
-  { poseType: 1, offsetX: -1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: 0.35, scale: 1.1, isStandout: false, bodyType: "volumetric", gender: "female", hairStyle: "long", expression: "happy" },
+  { poseType: 1, offsetX: -1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: 0.35, scale: 1.1, isStandout: false, bodyType: "volumetric", gender: "female", hairStyle: "long", expression: "none" },
   // 2. Inner Circle Background Right
   { poseType: 2, offsetX: 1.8, offsetY: -1.0, offsetZ: -1.5, rotationY: -0.35, scale: 1.1, isStandout: false, bodyType: "skinny", gender: "male", hairStyle: "short", expression: "content" },
   
   // 3. Middle Left Ground
-  { poseType: 3, offsetX: -3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: 0.55, scale: 1.08, isStandout: false, bodyType: "average", gender: "female", hairStyle: "long", expression: "happy" },
+  { poseType: 3, offsetX: -3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: 0.55, scale: 1.08, isStandout: false, bodyType: "average", gender: "female", hairStyle: "long", expression: "faceless" },
   // 4. Middle Right Ground
   { poseType: 4, offsetX: 3.5, offsetY: -1.0, offsetZ: -2.0, rotationY: -0.55, scale: 1.08, isStandout: false, bodyType: "athletic", gender: "male", hairStyle: "short", expression: "excited" },
   
@@ -829,7 +841,7 @@ export const CROWD_LAYOUTS: FigureLayout[] = [
   { poseType: 6, offsetX: 1.0, offsetY: -1.0, offsetZ: -3.4, rotationY: -0.15, scale: 1.05, isStandout: false, bodyType: "skinny", gender: "female", hairStyle: "long", expression: "content" },
 
   // 7. Middle Far Left
-  { poseType: 7, offsetX: -5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: 0.70, scale: 1.0, isStandout: false, bodyType: "average", gender: "male", hairStyle: "short", expression: "happy" },
+  { poseType: 7, offsetX: -5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: 0.70, scale: 1.0, isStandout: false, bodyType: "average", gender: "male", hairStyle: "short", expression: "none" },
   // 8. Middle Far Right
   { poseType: 0, offsetX: 5.0, offsetY: -1.0, offsetZ: -3.0, rotationY: -0.70, scale: 1.0, isStandout: false, bodyType: "athletic", gender: "female", hairStyle: "short", expression: "sad" },
 
@@ -839,7 +851,7 @@ export const CROWD_LAYOUTS: FigureLayout[] = [
   { poseType: 2, offsetX: 2.8, offsetY: -1.0, offsetZ: -4.8, rotationY: -0.30, scale: 0.98, isStandout: false, bodyType: "skinny", gender: "male", hairStyle: "bald", expression: "content" },
 
   // 11. Core Back Projection
-  { poseType: 3, offsetX: 0.0, offsetY: -1.0, offsetZ: -5.5, rotationY: 0.0, scale: 0.95, isStandout: false, bodyType: "average", gender: "female", hairStyle: "long", expression: "happy" },
+  { poseType: 3, offsetX: 0.0, offsetY: -1.0, offsetZ: -5.5, rotationY: 0.0, scale: 0.95, isStandout: false, bodyType: "average", gender: "female", hairStyle: "long", expression: "faceless" },
   
   // 12. Distant Deep Left
   { poseType: 4, offsetX: -4.5, offsetY: -1.0, offsetZ: -5.2, rotationY: 0.50, scale: 0.95, isStandout: false, bodyType: "athletic", gender: "male", hairStyle: "short", expression: "excited" },
@@ -859,7 +871,10 @@ export const CROWD_LAYOUTS: FigureLayout[] = [
 export function generateCrowdTextures(
   width: number,
   height: number,
-  options: { standoutPositions?: Float32Array | null } = {}
+  options: {
+    standoutPositions?: Float32Array | null;
+    scannedCrowdPositions?: Array<Float32Array | null>;
+  } = {}
 ): {
   targetPositions: Float32Array;
   initialPositions: Float32Array;
@@ -875,6 +890,12 @@ export function generateCrowdTextures(
   // ColWidth = 512.
 
   const tempPt = { x: 0, y: 0, z: 0 };
+  const scannedCrowdFigureIndices = [2, 4, 6, 8, 10, 12, 14];
+  const scannedCrowdSources =
+    options.scannedCrowdPositions?.filter(
+      (positions): positions is Float32Array => Boolean(positions?.length)
+    ) ?? [];
+  const scannedSourceFootY = -1.12;
 
   for (let figIdx = 0; figIdx < CROWD_LAYOUTS.length; figIdx++) {
     const layout = CROWD_LAYOUTS[figIdx];
@@ -897,6 +918,13 @@ export function generateCrowdTextures(
       figIdx === 0 && options.standoutPositions?.length === count * 3
         ? options.standoutPositions
         : null;
+    const scannedCrowdSlotIndex = scannedCrowdFigureIndices.indexOf(figIdx);
+    const scannedCrowdPositions =
+      scannedCrowdSlotIndex >= 0 && scannedCrowdSources.length > 0
+        ? scannedCrowdSources[scannedCrowdSlotIndex % scannedCrowdSources.length]
+        : null;
+    const scannedStride = 17 + figIdx * 8;
+    const scannedOffset = (figIdx * 7919) % (scannedCrowdPositions ? scannedCrowdPositions.length / 3 : 1);
 
     // Generate coordinates
     for (let i = 0; i < count; i++) {
@@ -909,6 +937,22 @@ export function generateCrowdTextures(
         worldX = standoutPositions[i * 3 + 0];
         worldY = standoutPositions[i * 3 + 1];
         worldZ = standoutPositions[i * 3 + 2];
+      } else if (scannedCrowdPositions) {
+        const sourceCount = scannedCrowdPositions.length / 3;
+        const sourceIndex = (scannedOffset + i * scannedStride) % sourceCount;
+        const sourceX = scannedCrowdPositions[sourceIndex * 3 + 0];
+        const sourceY = scannedCrowdPositions[sourceIndex * 3 + 1] - scannedSourceFootY;
+        const sourceZ = scannedCrowdPositions[sourceIndex * 3 + 2];
+        const scaleJitter = layout.scale * (0.9 + (figIdx % 5) * 0.035);
+        const angle = layout.rotationY + (figIdx % 2 === 0 ? 0.18 : -0.18);
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        const rx = sourceX * cosA - sourceZ * sinA;
+        const rz = sourceX * sinA + sourceZ * cosA;
+
+        worldX = rx * scaleJitter + layout.offsetX;
+        worldY = sourceY * scaleJitter + layout.offsetY;
+        worldZ = rz * scaleJitter + layout.offsetZ;
       } else {
         // Select segment based on bone weight, using currentSum to support arbitrary total weight
         const randValue = Math.random() * currentSum;

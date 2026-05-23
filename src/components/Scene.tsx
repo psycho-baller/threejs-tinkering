@@ -17,6 +17,7 @@ interface SceneProps {
   resetSignal: number;
   soloStandout?: boolean;
   debugView?: boolean;
+  renderPeopleMesh?: string;
 }
 
 export default function Scene({
@@ -32,13 +33,17 @@ export default function Scene({
   standoutColor,
   resetSignal,
   soloStandout = false,
-  debugView = false
+  debugView = false,
+  renderPeopleMesh = "100k"
 }: SceneProps) {
+  const debugCameraPosition: [number, number, number] = soloStandout ? [0, 0.05, 3.2] : [0, 0.25, 7.2];
+  const debugCameraTarget: [number, number, number] = soloStandout ? [0, -0.1, 0] : [0, -0.25, -3.4];
+
   return (
     <div id="canvas-container" className="w-full h-full relative" style={{ background: "#050508" }}>
       <Canvas
         camera={{
-          position: debugView ? [0, 0.38, 2.45] : [0, 1.2, 5.0],
+          position: debugView ? debugCameraPosition : [0, 1.2, 5.0],
           fov: debugView ? 38 : 50,
           near: 0.1,
           far: 100,
@@ -67,6 +72,7 @@ export default function Scene({
           standoutColor={standoutColor}
           resetSignal={resetSignal}
           soloStandout={soloStandout}
+          renderPeopleMesh={renderPeopleMesh}
         />
 
         {/* 2. Elegant cinematic camera limits for deep orbital views */}
@@ -78,16 +84,16 @@ export default function Scene({
           enablePan={false}
           maxPolarAngle={Math.PI / 2 + 0.15} // Let user look slightly upwards
           minPolarAngle={1.0}
-          target={debugView ? [0, 0.22, 0] : [0, 0.4, -0.6]} // Target center of gravity of the crowd
+          target={debugView ? debugCameraTarget : [0, 0.4, -0.6]} // Target center of gravity of the crowd
         />
 
         {/* 3. Epic Lusion bloom glow setup */}
         <EffectComposer>
           <Bloom
             mipmapBlur
-            luminanceThreshold={0.2} // Threshold to ensure background is slate-black
+            luminanceThreshold={debugView ? 0.65 : 0.2} // Threshold to ensure background is slate-black
             luminanceSmoothing={0.9}
-            intensity={debugView ? 0.55 : 1.8} // Rich, ambient golden glowing light leakage
+            intensity={debugView ? 0.06 : 1.8} // Rich, ambient golden glowing light leakage
           />
           <Noise opacity={debugView ? 0.006 : 0.02} />
         </EffectComposer>

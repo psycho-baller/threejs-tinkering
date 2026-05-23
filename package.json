@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "bake:renderpeople": "node scripts/bakeRenderPeopleStandout.mjs"
+    "bake:renderpeople": "node scripts/bakeRenderPeopleStandout.mjs",
+    "bake:renderpeople:300k": "RENDERPEOPLE_VARIANT=300k node scripts/bakeRenderPeopleStandout.mjs",
+    "bake:renderpeople:all": "npm run bake:renderpeople && npm run bake:renderpeople:300k"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
